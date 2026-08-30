@@ -30,6 +30,7 @@ import {
   pointInPolygon,
   pointSegmentDistance,
   presetMedalOutlinePoints,
+  projectUsedSlots,
   projectBackOffset,
   projectBundleForExport,
   simplifyClosedRing,
@@ -79,6 +80,14 @@ const GALLERY_TEMPLATE_INFO = Object.freeze({
     className: info.className,
   }])),
 });
+
+const PREMIUM_GALLERY_KEYS = Object.freeze([
+  'alpine-current-25k',
+  'showcase-night',
+  'aurora-polar-10k',
+  'heritage-marathon-42',
+  'podium-classic',
+]);
 
 // Earlier builds stored a multi-gigabyte browser model under this origin. The
 // browser inference path is gone; quietly release that obsolete cache so it
@@ -4531,6 +4540,99 @@ function templatePreviewMarkup(key, info = GALLERY_TEMPLATE_INFO[key]) {
   return `<span class="template-preview ${escapeHtml(info.className || key)}" aria-hidden="true">${escapeHtml(info.preview || '＋')}</span>`;
 }
 
+function projectForGalleryKey(key) {
+  return CURATED_EXAMPLE_INFO[key] ? createCuratedExample(key) : createTemplateProject(key);
+}
+
+function galleryProjectFacts(project) {
+  const medal = project.medal;
+  const size = medal.shape === 'circle' ? `Ø ${medal.diameter} mm` : `${medal.width} × ${medal.height} mm`;
+  const rim = RIM_STYLE_INFO[medal.rimStyle]?.label || 'Clean edge';
+  return [`${projectUsedSlots(project).length} colors`, size, rim, 'Front + back'];
+}
+
+function galleryCardMarkup(key) {
+  const info = GALLERY_TEMPLATE_INFO[key];
+  const project = projectForGalleryKey(key);
+  const selected = state.project.template === key || state.project.template === CURATED_EXAMPLE_INFO[key]?.template;
+  return `<button type="button" class="template-card premium-template-card ${selected ? 'selected' : ''}" data-gallery-template="${escapeHtml(key)}" aria-pressed="${selected}">
+    <canvas class="template-render" width="360" height="290" data-gallery-preview="${escapeHtml(key)}" aria-hidden="true"></canvas>
+    <span class="template-card-copy"><span class="gallery-card-kicker">Production-ready example</span><strong>${escapeHtml(info.label)}</strong><small>${escapeHtml(info.meta)}</small><span class="gallery-card-facts">${galleryProjectFacts(project).map(fact => `<i>${escapeHtml(fact)}</i>`).join('')}</span></span>
+    <span class="template-use">Open design</span>
+  </button>`;
+}
+
+function drawGalleryAttachment(context, metrics, project, palette) {
+  const attachment = medalAttachmentGeometry(project);
+  if (!attachment.external || project.medal.attachmentColor === null || project.medal.attachmentColor === undefined) return;
+  const px = metrics.pxPerMm;
+  const color = palette[project.medal.attachmentColor]?.color;
+  if (!color) return;
+  context.save();
+  context.translate(metrics.cx, metrics.cy);
+  context.fillStyle = color;
+  roundedRectPath(context, attachment.outer.x0 * px, attachment.outer.y0 * px, attachment.outer.width * px, attachment.outer.height * px, attachment.outer.radius * px);
+  context.fill();
+  context.globalCompositeOperation = 'destination-out';
+  for (const aperture of attachment.apertures) {
+    roundedRectPath(context, aperture.x0 * px, aperture.y0 * px, aperture.width * px, aperture.height * px, aperture.radius * px);
+    context.fill();
+  }
+  context.restore();
+}
+
+function renderGalleryProject(canvasElement, project) {
+  const context = canvasElement.getContext('2d');
+  const medal = project.medal;
+  const externalHeight = ['single', 'double'].includes(medal.loopStyle) ? medal.loopHeight : 0;
+  const pxPerMm = Math.min((canvasElement.width - 58) / medal.width, (canvasElement.height - 54) / (medal.height + externalHeight));
+  const metrics = { cx: canvasElement.width / 2, cy: canvasElement.height / 2 + externalHeight * pxPerMm * .2, pxPerMm, ySign: 1 };
+  const previousProject = state.project;
+  const previousView = state.view;
+  state.project = project;
+  state.view = '3d';
+  try {
+    const palette = getPalette(project, state.inventory);
+    const background = context.createLinearGradient(0, 0, 0, canvasElement.height);
+    background.addColorStop(0, '#f8f8f4');
+    background.addColorStop(1, '#e3e6df');
+    context.fillStyle = background;
+    context.fillRect(0, 0, canvasElement.width, canvasElement.height);
+    context.save();
+    context.shadowColor = 'rgba(18, 24, 21, .26)';
+    context.shadowBlur = 18;
+    context.shadowOffsetY = 10;
+    for (let offset = 14; offset >= 3; offset -= 2) drawBody(context, metrics, '#121816', offset);
+    drawBody(context, metrics, palette[medal.baseColor]?.color || palette[0]?.color || '#202a2f');
+    context.restore();
+    drawGalleryAttachment(context, metrics, project, palette);
+    drawRimStylePreview(context, metrics, palette);
+    punchAttachmentPreview(context, metrics);
+    context.shadowColor = 'rgba(0, 0, 0, .28)';
+    context.shadowBlur = 3.5;
+    context.shadowOffsetY = 2.4;
+    for (const element of project.elements) if (!element.hidden && element.face === 'front') drawElement(context, element, metrics, palette);
+    context.shadowColor = 'transparent';
+    context.save();
+    context.translate(metrics.cx, metrics.cy);
+    traceMedalFacePath(context, medal, pxPerMm, medal.edgeInset + medal.rimWidth + .8);
+    context.strokeStyle = 'rgba(255,255,255,.2)';
+    context.lineWidth = Math.max(1, pxPerMm * .18);
+    context.stroke();
+    context.restore();
+  } finally {
+    state.project = previousProject;
+    state.view = previousView;
+  }
+}
+
+function renderGalleryPreviews() {
+  document.querySelectorAll('[data-gallery-preview]').forEach(canvasElement => {
+    const key = canvasElement.dataset.galleryPreview;
+    if (GALLERY_TEMPLATE_INFO[key]) renderGalleryProject(canvasElement, projectForGalleryKey(key));
+  });
+}
+
 function closeTemplateGallery() {
   const gallery = $('#templateGallery');
   if (!gallery) return;
@@ -4548,11 +4650,8 @@ function openTemplateGallery() {
   const gallery = $('#templateGallery');
   const list = $('#templateGalleryList');
   state.galleryReturnFocus = document.activeElement;
-  list.innerHTML = Object.entries(GALLERY_TEMPLATE_INFO).map(([key, info]) => `<button type="button" class="template-card ${state.project.template === key || state.project.template === CURATED_EXAMPLE_INFO[key]?.template ? 'selected' : ''}" data-gallery-template="${escapeHtml(key)}">
-    ${templatePreviewMarkup(key, info)}
-    <span><strong>${escapeHtml(info.label)}</strong><small>${escapeHtml(info.meta)}</small></span>
-    <span class="template-use">${key === 'blank' ? 'Start clean' : 'Use example'}</span>
-  </button>`).join('');
+  list.innerHTML = `<section class="gallery-section" aria-labelledby="premiumGalleryHeading"><div class="gallery-section-heading"><div><span>Curated collection</span><h3 id="premiumGalleryHeading">Five medals ready to sell</h3></div><b>${PREMIUM_GALLERY_KEYS.length} editable designs</b></div>${PREMIUM_GALLERY_KEYS.map(galleryCardMarkup).join('')}</section>
+    <section class="gallery-start-section" aria-labelledby="blankGalleryHeading"><div><span>Prefer your own direction?</span><h3 id="blankGalleryHeading">Start from a clean medal</h3><p>The guided setup asks only for the body, size, and ribbon attachment.</p></div><button type="button" class="gallery-blank-action" data-gallery-template="blank">Start blank <span aria-hidden="true">→</span></button></section>`;
   const useTemplate = key => {
     const info = GALLERY_TEMPLATE_INFO[key];
     if (!info) return;
@@ -4568,7 +4667,7 @@ function openTemplateGallery() {
   setCustomModalBackgroundInert(gallery);
   $('#examplesButton')?.setAttribute('aria-expanded', 'true');
   $('#examplesRailButton')?.setAttribute('aria-expanded', 'true');
-  requestAnimationFrame(() => $('#closeTemplateGallery')?.focus());
+  requestAnimationFrame(() => { renderGalleryPreviews(); $('#closeTemplateGallery')?.focus(); });
 }
 
 function wizardProject(wizard = state.wizard) {

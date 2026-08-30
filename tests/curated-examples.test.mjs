@@ -7,10 +7,11 @@ import {
   createCuratedExample,
   listCuratedExamples,
 } from '../curated-examples.js';
+import { scoreMedalAesthetics } from '../medal-aesthetic.js';
 
-test('curated gallery exposes four original deterministic production fixtures', () => {
-  assert.deepEqual(CURATED_EXAMPLE_KEYS, ['summit-trail-21k', 'podium-classic', 'honey-run', 'junior-champion']);
-  assert.equal(listCuratedExamples().length, 4);
+test('curated gallery exposes seven original deterministic production fixtures', () => {
+  assert.deepEqual(CURATED_EXAMPLE_KEYS, ['alpine-current-25k', 'aurora-polar-10k', 'heritage-marathon-42', 'summit-trail-21k', 'podium-classic', 'honey-run', 'junior-champion']);
+  assert.equal(listCuratedExamples().length, 7);
   for (const key of CURATED_EXAMPLE_KEYS) {
     const first = createCuratedExample(key);
     const second = createCuratedExample(key);
@@ -26,6 +27,14 @@ test('curated gallery exposes four original deterministic production fixtures', 
     assert.equal(CURATED_EXAMPLE_INFO[key].bodyShape, first.medal.shape);
     assert.equal(CURATED_EXAMPLE_INFO[key].rimStyle, first.medal.rimStyle);
     assert.equal(CURATED_EXAMPLE_INFO[key].attachmentStyle, first.medal.loopStyle);
+  }
+});
+
+test('new premium examples clear the deterministic 9/10 release gate', () => {
+  for (const key of ['alpine-current-25k', 'aurora-polar-10k', 'heritage-marathon-42']) {
+    const assessment = scoreMedalAesthetics(createCuratedExample(key));
+    assert.equal(assessment.passed, true, `${key} scores ${assessment.score}/10: ${assessment.failedCategories.join(', ')}`);
+    assert.ok(assessment.score >= 9, `${key} scores at least 9/10`);
   }
 });
 
