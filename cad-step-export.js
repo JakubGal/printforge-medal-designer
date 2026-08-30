@@ -4,8 +4,22 @@ export function packStepColumns(sliceData) {
   const bounds = sliceData?.bounds;
   const cell = Number(sliceData?.cell);
   const columns = sliceData?.columns;
-  if (!bounds || !Array.isArray(columns) || columns.length !== bounds.cols * bounds.rows || !Number.isFinite(cell) || cell <= 0) {
+  const packed = sliceData?.columnData;
+  const hasColumns = Array.isArray(columns) && columns.length === bounds?.cols * bounds?.rows;
+  const hasPacked = packed?.offsets?.length === (bounds?.cols * bounds?.rows) + 1
+    && packed?.z0?.length === packed?.z1?.length
+    && packed?.z0?.length === packed?.slots?.length;
+  if (!bounds || (!hasColumns && !hasPacked) || !Number.isFinite(cell) || cell <= 0) {
     throw new Error('The production column field is not available for STEP export.');
+  }
+  if (hasPacked) {
+    const offsets = Uint32Array.from(packed.offsets);
+    const z0 = Float64Array.from(packed.z0), z1 = Float64Array.from(packed.z1), slots = Uint16Array.from(packed.slots);
+    if (z0.length > 4_000_000) throw new Error('The STEP model exceeds the safe 4,000,000-segment browser limit.');
+    return {
+      payload: { bounds: { cols: bounds.cols, rows: bounds.rows, minX: bounds.minX, minY: bounds.minY }, cell, columnData: { offsets, z0, z1, slots } },
+      transfers: [offsets.buffer, z0.buffer, z1.buffer, slots.buffer],
+    };
   }
   const offsets = new Uint32Array(columns.length + 1);
   let count = 0;
@@ -32,7 +46,9 @@ export function packStepColumns(sliceData) {
   };
 }
 
-export function columnsToStep(sliceData, onProgress = () => {}) {
+export function columnsToStep(sliceData, onProgress = () => {}, options = {}) {
+  const signal = options.signal;
+  if (signal?.aborted) { const error = new Error('Export cancelled'); error.name = 'AbortError'; return Promise.reject(error); }
   const { payload, transfers } = packStepColumns(sliceData);
   const worker = new Worker(new URL('./cad-step-worker.js', import.meta.url), { type: 'module', name: 'medalforge-step' });
   return new Promise((resolve, reject) => {
@@ -42,10 +58,13 @@ export function columnsToStep(sliceData, onProgress = () => {}) {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
+      signal?.removeEventListener('abort', abort);
       worker.terminate();
       callback(value);
     };
     const done = finish(resolve), fail = finish(reject);
+    const abort = () => { const error = new Error('Export cancelled'); error.name = 'AbortError'; fail(error); };
+    signal?.addEventListener('abort', abort, { once: true });
     timeout = setTimeout(() => fail(new Error('OpenCascade STEP export exceeded the 10-minute safety timeout.')), STEP_EXPORT_TIMEOUT_MS);
     worker.onerror = event => fail(new Error(event.message || 'The OpenCascade STEP worker could not start.'));
     worker.onmessage = event => {

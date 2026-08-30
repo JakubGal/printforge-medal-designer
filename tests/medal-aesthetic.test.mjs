@@ -8,7 +8,7 @@ import {
   requirePolishedMedal,
   scoreMedalAesthetics,
 } from '../medal-aesthetic.js';
-import { createTemplateProject } from '../project-model.js';
+import { buildChecks, createTemplateProject, DEFAULT_INVENTORY } from '../project-model.js';
 
 const PREMIUM_BRIEF = 'Prague Midnight Half Marathon, 21 km, 5 May 2027, night city skyline, elegant runner';
 
@@ -38,7 +38,8 @@ test('all text-to-medal variants are polished or rejected before presentation', 
     assert.ok(concept.quality.score >= 9, `${concept.label} scored ${concept.quality.score}`);
     assert.equal(concept.project.designPlan.aesthetic.passed, true);
     assert.equal(concept.project.designPlan.aesthetic.score, concept.quality.score);
-    assert.ok(concept.polishIterations >= 0 && concept.polishIterations <= 4);
+    assert.ok(concept.polishIterations >= 1 && concept.polishIterations <= 4);
+    assert.equal(concept.quality.categories.manufacturability.metrics.oneLineWarnings, 0);
   }
 });
 
@@ -57,8 +58,12 @@ test('polishing removes random heights, sub-nozzle lines, and edge collisions', 
   const front = source.elements.filter(element => element.face === 'front');
   const line = front.find(element => element.type === 'path' && !element.closed);
   const headline = front.find(element => element.type === 'text');
-  assert.ok(line && headline);
+  const symbol = front.find(element => element.type === 'shape');
+  const closedPath = front.find(element => element.type === 'path' && element.closed);
+  assert.ok(line && headline && symbol && closedPath);
   line.strokeWidth = .04;
+  symbol.size = .2;
+  closedPath.scale = .02;
   headline.x = source.medal.width;
   front.forEach((element, index) => { if (element.operation === 'raise') element.zHeight = .23 + index * .073; });
   const before = scoreMedalAesthetics(source);
@@ -67,8 +72,9 @@ test('polishing removes random heights, sub-nozzle lines, and edge collisions', 
   assert.equal(polished.accepted, true);
   assert.equal(polished.assessment.categories.manufacturability.metrics.blockers, 0);
   assert.equal(polished.assessment.categories.manufacturability.metrics.subNozzleLines, 0);
+  assert.equal(buildChecks(polished.project, DEFAULT_INVENTORY).some(check => /uses one-line detail/i.test(check.title)), false);
   assert.ok(polished.assessment.categories.detailContinuity.metrics.reliefTiers <= 3);
-  assert.ok(polished.history.some(entry => entry.changes.some(change => /sub-nozzle/.test(change))));
+  assert.ok(polished.history.some(entry => entry.changes.some(change => /one-line/.test(change))));
   assert.ok(polished.history.some(entry => entry.changes.some(change => /safe area/.test(change))));
 });
 

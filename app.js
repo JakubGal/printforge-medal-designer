@@ -1,4 +1,5 @@
 import { loadRecord, saveRecord } from './storage.js';
+import { traceShapePath } from './shape-library.js';
 import {
   ASIA_FILAMENT_PRESETS,
   ATTACHMENT_STYLE_INFO,
@@ -151,6 +152,15 @@ const state = {
   drag: null,
   alignmentGuides: null,
   saveTimer: null,
+  savePromise: null,
+  saveRevision: 0,
+  saveDirty: false,
+  lastSavedSnapshot: null,
+  lastRecoveryAt: 0,
+  projectLibrary: [],
+  exportJob: null,
+  exportPreflightId: null,
+  libraryRequestId: null,
   toastTimer: null,
   inspectorEditStart: null,
   inlineTextEditStart: null,
@@ -219,12 +229,20 @@ const state = {
   },
 };
 
-function toast(message) {
+function toast(message, options = {}) {
   const element = $('#toast');
   element.textContent = message;
+  element.classList.toggle('error', Boolean(options.error));
   element.classList.add('show');
   clearTimeout(state.toastTimer);
-  state.toastTimer = setTimeout(() => element.classList.remove('show'), 2400);
+  state.toastTimer = setTimeout(() => { element.classList.remove('show'); element.classList.remove('error'); }, options.error ? 8000 : 2400);
+}
+
+function announce(message) {
+  const output = $('#a11yStatus');
+  if (!output) return;
+  output.textContent = '';
+  requestAnimationFrame(() => { output.textContent = message; });
 }
 
 function snapshot() { return JSON.stringify(state.project); }
@@ -269,8 +287,11 @@ function markSavePending() {
     label.classList.remove('saving');
     return;
   }
+  state.saveRevision += 1;
+  state.saveDirty = true;
   label.textContent = 'Saving…';
   label.classList.add('saving');
+  label.classList.remove('error');
   clearTimeout(state.saveTimer);
   state.saveTimer = setTimeout(persistProject, 550);
 }
@@ -291,27 +312,71 @@ function markDirty() {
 }
 
 async function persistProject() {
-  if (!state.project) return;
+  if (!state.project) return false;
   if (state.qaMode) {
     const label = $('#saveState');
     label.textContent = 'QA fixture · temporary';
     label.classList.remove('saving');
-    return;
+    return true;
   }
   if (state.liveEdit) {
     clearTimeout(state.saveTimer);
     state.saveTimer = setTimeout(persistProject, 550);
-    return;
+    return false;
   }
+  if (state.savePromise) {
+    await state.savePromise;
+    if (!state.saveDirty) return true;
+  }
+  state.project.id = String(state.project.id || uid('project')).slice(0, 120);
+  state.project.createdAt ||= new Date().toISOString();
   state.project.updatedAt = new Date().toISOString();
   const label = $('#saveState');
+  const revision = state.saveRevision;
+  const operation = (async () => {
+    const currentSnapshot = snapshot();
+    const projectRecord = JSON.parse(currentSnapshot);
+    const now = Date.now();
+    if (state.lastSavedSnapshot && state.lastSavedSnapshot !== currentSnapshot && now - state.lastRecoveryAt > 60_000) {
+      await saveUserRecord('projects', `recovery-${state.project.id}`, JSON.parse(state.lastSavedSnapshot));
+      state.lastRecoveryAt = now;
+    }
+    await saveUserRecord('projects', 'active', projectRecord);
+    await saveUserRecord('projects', projectRecord.id, projectRecord);
+    const meta = { id: projectRecord.id, name: projectRecord.name, createdAt: projectRecord.createdAt, updatedAt: projectRecord.updatedAt, elements: projectRecord.elements.length, colors: projectRecord.paletteIds.length };
+    const library = Array.isArray(state.projectLibrary) ? state.projectLibrary : [];
+    state.projectLibrary = [meta, ...library.filter(item => item?.id !== meta.id)].slice(0, 24);
+    await saveUserRecord('settings', 'project-library', state.projectLibrary);
+    return currentSnapshot;
+  })();
+  state.savePromise = operation;
   try {
-    await saveUserRecord('projects', 'active', state.project);
-    label.textContent = 'Saved locally';
+    const savedSnapshot = await operation;
+    const stillCurrent = revision === state.saveRevision && snapshot() === savedSnapshot;
+    if (stillCurrent) {
+      state.lastSavedSnapshot = savedSnapshot;
+      state.saveDirty = false;
+      label.textContent = 'Saved on this device';
+      label.classList.remove('saving', 'error');
+      label.title = 'Open your saved medals';
+    } else {
+      state.saveDirty = true;
+      label.textContent = 'Saving latest changes…';
+      clearTimeout(state.saveTimer);
+      state.saveTimer = setTimeout(persistProject, 0);
+    }
+    return true;
+  } catch (error) {
+    state.saveDirty = true;
+    label.textContent = 'Save failed · backup';
     label.classList.remove('saving');
-  } catch {
-    label.textContent = 'Save failed';
-    label.classList.add('saving');
+    label.classList.add('error');
+    label.title = 'Storage is full or unavailable. Click to download an emergency backup.';
+    console.error('Could not save project', error);
+    if (window.matchMedia?.('(max-width: 900px)')?.matches) toast('Autosave failed · open My medals to download a backup', { error: true });
+    return false;
+  } finally {
+    if (state.savePromise === operation) state.savePromise = null;
   }
 }
 
@@ -449,7 +514,7 @@ function resetViewerWorkspace() {
   state.viewerResult = null;
   state.viewerStats = null;
   state.hoveredId = null;
-  $('#zoomLabel').textContent = '100%';
+  $('#zoomLabel').textContent = '3D';
   $('#explodeSlider').value = '0';
   $('#explodeLabel').textContent = '0.0 mm';
   $('#layerSlider').value = '1';
@@ -457,13 +522,39 @@ function resetViewerWorkspace() {
   $('#toggleInspectLayers').classList.remove('active');
   $('#toggleInspectLayers').setAttribute('aria-expanded', 'false');
   $('#slicerDock').hidden = true;
-  $('#projectionToggle').textContent = 'Perspective';
+  updateProjectionToggle('perspective');
   $('#viewerGrid').checked = true;
   $('#viewerRibbon').checked = state.ribbonPreviewVisible;
   $('#viewerRibbonColor').value = state.ribbonPreviewColor;
   $('#surfaceProbe').hidden = true;
   $$('[data-camera]').forEach(button => button.classList.toggle('active', button.dataset.camera === 'iso'));
   state.viewer?.resetWorkspace();
+}
+
+function updateProjectionToggle(projection = 'perspective') {
+  const button = $('#projectionToggle');
+  if (!button) return;
+  const normalized = projection === 'orthographic' ? 'orthographic' : 'perspective';
+  button.dataset.projection = normalized;
+  button.textContent = `View: ${normalized === 'orthographic' ? 'Orthographic' : 'Perspective'}`;
+  button.title = `Switch to ${normalized === 'orthographic' ? 'perspective' : 'orthographic'} view`;
+}
+
+function setCameraPreset(preset, { speak = false, workspace = true } = {}) {
+  const normalized = ['iso', 'top', 'bottom', 'front', 'right'].includes(preset) ? preset : 'iso';
+  $$('[data-camera]').forEach(button => button.classList.toggle('active', button.dataset.camera === normalized));
+  state.viewer?.setPreset(normalized);
+  if (normalized === 'top' || normalized === 'bottom') {
+    state.drawing.face = normalized === 'bottom' ? 'back' : 'front';
+    if (workspace) {
+      $('#workspaceModeLabel').textContent = state.drawing.face === 'back' ? 'Back side · flat colors' : 'Front side · raised or recessed';
+      $('#workspaceModeHelp').textContent = state.drawing.face === 'back' ? 'New artwork is embedded flush into the first print layer' : 'Click artwork to edit · drag the blue height handle to raise or recess';
+    }
+  } else if (workspace) {
+    $('#workspaceModeLabel').textContent = '3D medal';
+    $('#workspaceModeHelp').textContent = 'Drag empty space to rotate · click artwork to edit it';
+  }
+  if (speak) announce(({ top: 'Front side', bottom: 'Back side', iso: '3D view', front: 'Edge view', right: 'Side view' })[normalized]);
 }
 
 function replaceProject(project) {
@@ -478,6 +569,9 @@ function replaceProject(project) {
   state.modelDrag = null;
   state.transformDrag = null;
   state.project = normalizeProject(project);
+  state.project.id = String(state.project.id || uid('project')).slice(0, 120);
+  state.project.createdAt ||= new Date().toISOString();
+  state.lastSavedSnapshot = null;
   const catalog = mergeRequiredDefaultFilaments(state.inventory, state.project.paletteIds);
   state.inventory = catalog.inventory;
   if (catalog.added) saveUserRecord('inventory', 'catalog', state.inventory).catch(error => console.error('Could not extend the local filament catalog', error));
@@ -588,10 +682,10 @@ function updateRibbonPreview() {
 }
 
 const OPERATION_INFO = {
-  raise: { label: 'Raise', short: 'Raised', icon: '＋', help: 'Adds material above the face.' },
-  engrave: { label: 'Engrave', short: 'Engraved', icon: '↓', help: 'Cuts a recessed pocket while keeping a solid floor.' },
-  inlay: { label: 'Inlay', short: 'Inlay', icon: '◆', help: 'Cuts a pocket and fills it with the selected filament.' },
-  cut: { label: 'Cut through', short: 'Through cut', icon: '○', help: 'Removes material through the full medal.' },
+  raise: { label: 'Raised', short: 'Raised', icon: '＋', help: 'Adds material above the medal face.' },
+  engrave: { label: 'Recessed', short: 'Recessed', icon: '↓', help: 'Presses the design into the medal while keeping a solid floor.' },
+  inlay: { label: 'Flat color', short: 'Flat color', icon: '◆', help: 'Places another filament color flush inside the medal face.' },
+  cut: { label: 'Hole', short: 'Hole', icon: '○', help: 'Removes material through the full medal.' },
 };
 
 function operationDefaults(element = {}) {
@@ -703,6 +797,9 @@ function captureColorContext(context) {
     value: $('#newTextValue').value,
     size: $('#newTextSize')?.value,
     weight: $('#newTextWeight')?.value,
+    font: $('#newTextFont')?.value,
+    position: $('#newTextPosition')?.value,
+    autoFit: $('#newTextAutoFit')?.checked,
   } : null;
   const segmentId = context === 'element' && selected?.type === 'image' && selected.rasterKind === 'segment' ? selected.id : null;
   const inspectorImageId = context === 'inspector-image' && selected?.type === 'image' ? selected.id : null;
@@ -759,6 +856,9 @@ function finalizeColorContext(context, slot, captured) {
     $('#newTextValue').value = captured.textDraft.value;
     if ($('#newTextSize')) $('#newTextSize').value = captured.textDraft.size;
     if ($('#newTextWeight')) $('#newTextWeight').value = captured.textDraft.weight;
+    if ($('#newTextFont')) $('#newTextFont').value = captured.textDraft.font || 'Arial';
+    if ($('#newTextPosition')) $('#newTextPosition').value = captured.textDraft.position || 'center';
+    if ($('#newTextAutoFit')) $('#newTextAutoFit').checked = captured.textDraft.autoFit !== false;
   }
 }
 
@@ -971,10 +1071,13 @@ function textPanel(embedded = false) {
       <div class="dimension-grid">
         <label>Size<input id="newTextSize" type="number" min="1" max="${DESIGN_LIMITS.textSizeMax}" step="0.1" value="6" /></label>
         <label>Weight<select id="newTextWeight"><option value="700">Bold</option><option value="800" selected>Extra bold</option><option value="900">Heavy</option></select></label>
+        <label>Style<select id="newTextFont"><option value="Arial">Clean</option><option value="Verdana">Wide</option><option value="Georgia">Classic serif</option></select></label>
+        <label>Starting position<select id="newTextPosition"><option value="center">Center</option><option value="top">Near the top</option><option value="bottom">Near the bottom</option></select></label>
       </div>
+      <label class="check-row compact-check"><input id="newTextAutoFit" type="checkbox" checked><span><strong>Auto-fit long text</strong><small>Keeps wording inside the printable edge.</small></span></label>
       ${createColorPickerHtml()}
-      <button class="primary-wide" id="addTextButton">Place text on medal</button>
-      <small class="field-help">Move the real text preview over either face. On the back it reads correctly and is automatically embedded flush in the first layer. After placement, use the square handles to scale it.</small>
+      <button class="primary-wide" id="addTextButton">Next: position text in 3D</button>
+      <small class="field-help">Move the real text preview over either side and click to place it. Back text reads correctly and is automatically embedded flat in the first print layer.</small>
     </div>`;
 }
 
@@ -1002,8 +1105,9 @@ function uploadPanel(embedded = false) {
     : ready
       ? 'Online images are enabled for this app. Customers never enter an API key.'
       : 'Online generation may be enabled by the site owner. The free local option is always the default.';
-  return `${embedded ? '' : panelHeading('Bring your artwork', 'Upload an image')}
-    <div class="local-image-generator cloud-image-generator">
+  return `${embedded ? '' : panelHeading('Bring your artwork', 'Images & logos')}
+    <div class="image-primary-actions ${hostedStatic ? 'single-action' : ''}"><button type="button" class="action-card" id="uploadPrimary"><span class="action-icon">↑</span><span><strong>Use my image</strong><small>PNG, JPEG, SVG, or DXF</small></span></button>${hostedStatic ? '' : '<button type="button" class="action-card" id="createImagePrimary"><span class="action-icon">✦</span><span><strong>Create an image</strong><small>Describe it in everyday words</small></span></button>'}</div>
+    ${hostedStatic ? '' : `<details class="image-create-disclosure friendly-disclosure"><summary>Create an image from a description</summary><div><div class="local-image-generator cloud-image-generator">
       <label class="generator-provider"><span>Where should the image be created?</span><select id="imageGeneratorMode" class="select-input" aria-label="Image generator" ${state.localAiBusy || hostedStatic ? 'disabled' : ''}><option value="local" ${localMode ? 'selected' : ''}>On this computer · local/desktop edition</option><option value="cloud" ${localMode ? '' : 'selected'}>Online · site-owner service</option></select></label>
       <div class="local-ai-title"><span class="eyebrow">${localMode ? 'Private · uses this computer' : 'Fast · provided by this app'}</span><span class="local-ai-badge ${badgeClass}" id="localAiBadge">${escapeHtml(badgeText)}</span></div>
       <strong>Create an image</strong>
@@ -1019,22 +1123,20 @@ function uploadPanel(embedded = false) {
       <div class="local-ai-progress" id="localAiProgressWrap" ${state.localAiBusy ? '' : 'hidden'} role="status" aria-live="polite"><progress id="localAiProgress" max="1" aria-label="Image creation progress"></progress><span id="localAiProgressText">${state.localAiProgress?.message ? escapeHtml(state.localAiProgress.message) : 'Preparing…'}</span><button type="button" id="cancelLocalAi">Cancel</button></div>
       <small class="field-help ${state.localAiError ? 'generator-error' : ''}" id="localAiStatus" ${state.localAiError ? 'role="alert"' : 'role="status"'} aria-live="polite">${escapeHtml(state.localAiStatus || initialStatus)}</small>
       <div class="local-ai-foot"><span>${hostedStatic ? 'Static hosting · no hidden API calls or customer keys' : localMode ? `Automatic first-time setup${setup?.downloadSize ? ` · ${escapeHtml(setup.downloadSize)} download` : ''} · no commands` : 'No customer keys · availability is managed for the whole app'}</span><button type="button" id="localAiInfo">${hostedStatic ? 'Why this is unavailable' : localMode ? 'Privacy & licenses' : 'About online images'}</button></div>
-    </div>
-    <div class="upload-or"><span>or import existing artwork</span></div>
+    </div></div></details>`}
+    <div class="upload-or"><span>or drag a file below</span></div>
     <div class="automatic-medal-import"><span>◎</span><div><strong>Build a complete medal from one picture</strong><small>For a round medal concept, the app automatically removes the ribbon and studio background, applies face/rim colors, finds likely text lines, and separates the graphics into editable objects.</small></div></div>
     <button class="upload-drop" id="uploadDrop">
-      <b>↑</b><strong>Choose or drop a file</strong><span>PNG, JPEG, SVG, or basic 2D DXF · up to 24 MB</span>
+      <b>↑</b><strong>Drop a file here, or choose one</strong><span>PNG, JPEG, SVG, or basic 2D DXF · up to 24 MB</span>
     </button>
     <div class="upload-note"><strong>Preview and clean every image before it touches the medal.</strong><br/>Crop it, remove only edge-connected background, choose a silhouette/outline/color effect, and limit its filament colors—all on this computer.</div>
     <div class="image-color-card"><div class="image-color-head"><strong>Colors used for new images</strong><span class="image-color-head-actions">${inlineAddColorButtonHtml('upload')}<button type="button" id="uploadColorsButton">Manage</button></span></div><div class="image-color-list">${colors.map((filament, index) => `<span class="image-color-chip"><i style="background:${filament.color}"></i>${index + 1}. ${escapeHtml(filament.name)}</span>`).join('')}</div></div>
-    <div class="action-stack">
-      <button class="action-card" id="importProjectButton"><span class="action-icon">↗</span><span><strong>Open a MedalForge project</strong><small>Continue from a previously exported JSON file.</small></span></button>
-    </div>`;
+    `;
 }
 
 function shapesPanel(embedded = false) {
-  const shapes = [['circle','●','Circle'],['square','■','Square'],['diamond','◆','Diamond'],['star','★','Star'],['hexagon','⬢','Hexagon'],['bolt','ϟ','Bolt'],['heart','♥','Heart']];
-  return `${embedded ? '' : panelHeading('Simple graphics', 'Add a shape')}<div class="shape-grid">${shapes.map(([kind, icon, label]) => `<button class="shape-button" data-add-shape="${kind}"><b>${icon}</b><span>${label}</span></button>`).join('')}</div>${createColorPickerHtml()}<div class="create-surface-note"><strong>Click a shape, then click the medal to place it.</strong><br/>Front shapes can use relief or pockets. Back shapes automatically become flat first-layer color.</div>`;
+  const shapes = [['circle','●','Circle'],['square','■','Square'],['triangle','▲','Triangle'],['diamond','◆','Diamond'],['star','★','Star'],['hexagon','⬢','Hexagon'],['bolt','ϟ','Bolt'],['heart','♥','Heart'],['mountain','⌃','Mountain'],['flag','⚑','Finish flag'],['trophy','♜','Trophy'],['runner','➜','Runner']];
+  return `${embedded ? '' : panelHeading('Print-safe symbols', 'Add a symbol')}<label class="shape-size-control"><span>Starting size</span><div class="unit-input"><input id="newShapeSize" type="number" min="2" max="${DESIGN_LIMITS.shapeSizeMax}" step="0.5" value="12"><em>mm</em></div></label><div class="shape-grid">${shapes.map(([kind, icon, label]) => `<button class="shape-button" data-add-shape="${kind}"><b>${icon}</b><span>${label}</span></button>`).join('')}</div>${createColorPickerHtml()}<div class="create-surface-note"><strong>Choose a symbol, then click either side of the 3D medal.</strong><br/>The size stays editable with the square corner handles.</div>`;
 }
 
 function drawPanel(embedded = false) {
@@ -1354,6 +1456,7 @@ async function generateConceptCandidates() {
 }
 
 function ideasPanel(embedded = false) {
+  const hostedStatic = RUNTIME_CONFIG.staticHosting;
   const parsed = parseConceptBrief(state.conceptBrief || 'running event');
   const planPreview = parseMedalBrief(state.conceptBrief || 'running event', {
     manufacturing: {
@@ -1381,20 +1484,17 @@ function ideasPanel(embedded = false) {
     return `<button type="button" class="concept-card" data-use-concept="${index}">${preview ? `<img src="${escapeHtml(preview)}" alt="Front and back preview of ${escapeHtml(project.conceptMeta?.label || project.name)}" />` : `<span>${index + 1}</span>`}<span class="concept-rank">#${index + 1}</span><strong>${escapeHtml(project.conceptMeta?.label || project.name.split(' · ').at(-1))}${badge}</strong><small>${escapeHtml(project.conceptMeta?.description || `${project.elements.length} editable objects`)}<br>${project.elements.length} editable vector objects · flat printable back${weakestLabel ? ` · lowest check: ${escapeHtml(weakestLabel)}` : ''}</small></button>`;
   }).join('');
   const openAi = state.conceptProviderStatus?.openai;
-  const local = state.conceptProviderStatus?.local;
   const openAiReady = Boolean(openAi?.available && openAi?.configured);
-  const selectedProviderCopy = state.conceptGeneratorMode === 'openai' && openAiReady
-    ? `Managed OpenAI · ${escapeHtml(openAi.model || 'structured planner')} · credentials stay on the server`
-    : local?.modelConfigured
-      ? `This computer · free local ${escapeHtml(local.model || 'AI model')} with instant safe fallback`
-      : 'This computer · free deterministic design engine · no account, download or API key';
   const status = state.conceptGenerationError
     ? `<div class="concept-generation-status error"><strong>Draft withheld</strong><span>${escapeHtml(state.conceptGenerationError)}</span></div>`
     : state.conceptGenerationBusy || state.conceptGenerationProgress
       ? `<div class="concept-generation-status ${state.conceptGenerationBusy ? 'busy' : 'ready'}"><strong>${state.conceptGenerationBusy ? 'Designing and scoring…' : 'Quality gate passed'}</strong><span id="conceptGenerationStatus">${escapeHtml(state.conceptGenerationProgress)}</span></div>`
       : '';
   const bestAction = state.conceptCandidates.length ? `<button type="button" class="primary-wide concept-best" id="useBestConcept">Use highest-scoring medal · ${Number(state.conceptCandidates[0].conceptMeta?.qualityScore).toFixed(1)}/10</button>` : '';
-  return `${embedded ? '' : panelHeading('Text to medal', 'Polished editable designs')}<div class="tool-form"><div class="concept-provider"><span>Design engine</span><div class="concept-provider-options"><button type="button" data-concept-mode="local" class="${state.conceptGeneratorMode === 'local' ? 'active' : ''}" aria-pressed="${state.conceptGeneratorMode === 'local'}"><b>On this computer</b><small>Free · always available</small></button><button type="button" data-concept-mode="openai" class="${state.conceptGeneratorMode === 'openai' ? 'active' : ''}" aria-pressed="${state.conceptGeneratorMode === 'openai'}" ${openAiReady ? '' : 'disabled'}><b>Managed OpenAI</b><small>${state.conceptProviderProbeBusy || !state.conceptProviderStatus ? 'Checking…' : openAiReady ? 'More creative planning' : 'Not configured here'}</small></button></div><small class="field-help">${selectedProviderCopy}. ChatGPT login cannot authorize API use inside another website, so MedalForge never asks an ordinary user for a secret key.</small></div><label><span>Describe the finished medal</span><textarea class="text-input concept-brief" id="conceptBrief" rows="5" ${state.conceptGenerationBusy ? 'disabled' : ''} placeholder="Example: Premium Prague night run, 10 km, 12 June 2027, elegant runners, moon and skyline">${escapeHtml(state.conceptBrief || '')}</textarea></label><button class="primary-wide" id="generateConcepts" ${state.conceptGenerationBusy ? 'disabled' : ''}>${state.conceptGenerationBusy ? 'Creating editable medal…' : 'Create 4 polished editable medals'}</button>${state.conceptGenerationBusy ? '<button type="button" class="quiet-wide" id="cancelConceptGeneration">Cancel</button>' : ''}<small class="field-help">This creates real editable text, smooth vector art, controlled filament colors, edge style, ribbon attachment and a flat multicolor reverse. The description is interpreted; it is never pasted onto the medal.</small><div class="quality-gate"><strong><span>9+</span> Release gate</strong><small>Typography · hierarchy · balance · spacing · focal art · palette · printability · smooth vector detail</small></div>${status}<div class="idea-parse-preview"><span>Editable text</span><strong>${escapeHtml(planPreview.event.title)} · ${escapeHtml(previewDistance)} · ${escapeHtml(previewDate)}</strong><span>Artwork subject</span><strong>${escapeHtml(parsed.visualSubject)}</strong></div>${bestAction}<div class="concept-results">${cards}</div><div class="ai-local-note"><strong>Need a custom illustrated source?</strong><span>Open Image with only the visual subject filled in, then convert the chosen result into separate printable color regions.</span><button type="button" id="ideasToImage">Create image…</button><button type="button" id="copyArtworkPrompt">Copy print-ready prompt</button><button type="button" id="localAiInfo">How image generation works</button></div></div>`;
+  const artworkActions = hostedStatic
+    ? '<span>Copy a print-aware prompt for your preferred image tool, then import the result under Image.</span><button type="button" id="copyArtworkPrompt">Copy artwork prompt</button>'
+    : '<span>Create only the visual subject, then convert it into separate printable color areas.</span><button type="button" id="ideasToImage">Create image…</button><button type="button" id="copyArtworkPrompt">Copy artwork prompt</button><button type="button" id="localAiInfo">How image creation works</button>';
+  return `${embedded ? '' : panelHeading('Describe it', 'Create a complete medal')}<div class="tool-form"><div class="concept-provider"><span>Runs free on this device</span>${openAiReady ? `<div class="concept-provider-options"><button type="button" data-concept-mode="local" class="${state.conceptGeneratorMode === 'local' ? 'active' : ''}" aria-pressed="${state.conceptGeneratorMode === 'local'}"><b>Free on this device</b><small>Private · always available</small></button><button type="button" data-concept-mode="openai" class="${state.conceptGeneratorMode === 'openai' ? 'active' : ''}" aria-pressed="${state.conceptGeneratorMode === 'openai'}"><b>Creative online service</b><small>Enabled by the site owner</small></button></div>` : ''}<small class="field-help">Describe the event in ordinary words. The app turns the idea into editable text, symbols, colors, edges, and a printable back.</small></div><label><span>What is the medal for?</span><textarea class="text-input concept-brief" id="conceptBrief" rows="5" ${state.conceptGenerationBusy ? 'disabled' : ''} placeholder="Example: Premium Prague night run, 10 km, 12 June 2027, elegant runners, moon and skyline">${escapeHtml(state.conceptBrief || '')}</textarea></label><button class="primary-wide" id="generateConcepts" ${state.conceptGenerationBusy ? 'disabled' : ''}>${state.conceptGenerationBusy ? 'Creating editable medal…' : 'Create 4 editable medal ideas'}</button>${state.conceptGenerationBusy ? '<button type="button" class="quiet-wide" id="cancelConceptGeneration">Cancel</button>' : ''}<small class="field-help">Your description is interpreted; it is never pasted as one long sentence on the medal.</small><div class="quality-gate"><strong><span>✓</span> Quality checked</strong><small>Wording · balance · spacing · focal art · palette · printability · smooth detail</small></div>${status}<details class="friendly-disclosure"><summary>See what the app understood</summary><div class="idea-parse-preview"><span>Editable text</span><strong>${escapeHtml(planPreview.event.title)} · ${escapeHtml(previewDistance)} · ${escapeHtml(previewDate)}</strong><span>Artwork subject</span><strong>${escapeHtml(parsed.visualSubject)}</strong></div></details>${bestAction}<div class="concept-results">${cards}</div><div class="ai-local-note"><strong>Want custom illustrated artwork?</strong>${artworkActions}</div></div>`;
 }
 
 function createPanel() {
@@ -1435,7 +1535,7 @@ function updateMedalThicknessSummary() {
   const layers = $('#medalBodyLayerCount');
   const finished = $('#medalFinishedThickness');
   if (layers) layers.textContent = bodyLayerCountLabel(metrics);
-  if (finished) finished.textContent = `${metrics.finished.toFixed(2)} mm ${metrics.exact ? 'compiled' : 'estimated'}`;
+  if (finished) finished.textContent = `${metrics.finished.toFixed(2)} mm ${metrics.exact ? 'measured from model' : 'estimate'}`;
   $$('#toolPanelContent [data-medal-thickness]').forEach(button => {
     const active = Math.abs(Number(button.dataset.medalThickness) - metrics.body) < .001;
     button.classList.toggle('active', active);
@@ -1469,10 +1569,10 @@ function medalPanel() {
     return `<section class="material-role-card"><div class="material-role-copy"><span>${escapeHtml(label)}</span><strong><i style="background:${selected?.color || '#777'}"></i>${escapeHtml(selected?.name || 'Material')}</strong><small>${escapeHtml(description)}</small></div><div class="material-role-swatches" role="radiogroup" aria-label="${escapeHtml(label)} color">${palette.map((filament, index) => `<button type="button" role="radio" aria-checked="${Number(medal[field]) === index}" class="${Number(medal[field]) === index ? 'active' : ''}" data-medal-color-field="${field}" data-medal-color-slot="${index}" title="${escapeHtml(filament.name)} · ${escapeHtml(filament.effect)}" aria-label="Color ${index + 1}: ${escapeHtml(filament.name)}"><i style="background:${filament.color}"></i><span>${index + 1}</span></button>`).join('')}${inlineAddColorButtonHtml(`medal:${field}`, { compact: true })}</div></section>`;
   };
   const edgeStyles = `<button type="button" class="rim-style-card ${medal.rimWidth <= 0 ? 'active' : ''}" data-rim-style="none"><b>—</b><span>None</span><small>Flat edge</small></button>${Object.entries(RIM_STYLE_INFO).map(([key, info]) => `<button type="button" class="rim-style-card ${medal.rimWidth > 0 && medal.rimStyle === key ? 'active' : ''}" data-rim-style="${key}"><b>${info.icon}</b><span>${escapeHtml(info.label)}</span><small>${escapeHtml(info.description)}</small></button>`).join('')}`;
-  return `${panelHeading('Base geometry', 'Medal setup')}
+  return `${panelHeading('Medal basics', 'Body, edge & ribbon')}
     <label class="field-label">Outline</label>
     <div class="outline-picker">${outlines.map(([shape, icon, label]) => `<button data-medal-shape="${shape}" class="${medal.shape === shape ? 'active' : ''}"><b>${icon}</b><span>${label}</span></button>`).join('')}</div>
-    <div class="custom-outline-card"><span><strong>Any custom silhouette</strong><small>Draw a closed polygon or import a closed DXF path, select it, then convert it into the printable medal body.</small></span><span class="custom-outline-actions"><button id="useSelectedOutline" ${canUseOutline ? '' : 'disabled'}>${canUseOutline ? `Use “${escapeHtml(outlineSource.name)}”` : 'Select a closed path'}</button>${savedOutlineSource ? '<button id="restoreOutlineSource">Edit source path</button>' : ''}</span></div>
+    <details class="friendly-disclosure"><summary>Use my own medal outline</summary><div class="custom-outline-card"><span><strong>Custom drawn or DXF outline</strong><small>Draw a closed shape or import an outline, select it, then turn it into the medal body.</small></span><span class="custom-outline-actions"><button id="useSelectedOutline" ${canUseOutline ? '' : 'disabled'}>${canUseOutline ? `Use “${escapeHtml(outlineSource.name)}”` : 'Select a closed outline'}</button>${savedOutlineSource ? '<button id="restoreOutlineSource">Edit source outline</button>' : ''}</span></div></details>
     <div class="dimension-grid medal-planar-dimensions">
       ${medal.shape === 'circle' ? `<label>Diameter (mm)<input data-medal-field="diameter" type="number" min="${DESIGN_LIMITS.medalMin}" max="${DESIGN_LIMITS.medalMax}" step="1" value="${medal.diameter}" /></label>` : `<label>Width (mm)<input data-medal-field="width" type="number" min="${DESIGN_LIMITS.medalMin}" max="${DESIGN_LIMITS.medalMax}" step="1" value="${medal.width}" /></label><label>Height (mm)<input data-medal-field="height" type="number" min="${DESIGN_LIMITS.medalMin}" max="${DESIGN_LIMITS.medalMax}" step="1" value="${medal.height}" /></label>`}
       ${medal.shape === 'rounded' ? `<label>Corner radius<input data-medal-field="cornerRadius" type="number" min="1" max="${Math.min(medal.width, medal.height) / 2}" step="1" value="${medal.cornerRadius}" /></label>` : ''}
@@ -1485,19 +1585,19 @@ function medalPanel() {
       <div class="medal-thickness-presets" aria-label="Common medal thicknesses">
         ${[2, 2.4, 3, 4].map(value => `<button type="button" data-medal-thickness="${value}" class="${Math.abs(medal.baseThickness - value) < .001 ? 'active' : ''}" aria-pressed="${Math.abs(medal.baseThickness - value) < .001}">${value.toFixed(value % 1 ? 1 : 0)} mm</button>`).join('')}
       </div>
-      <div class="medal-thickness-meta"><span><b id="medalBodyLayerCount">${bodyLayerCountLabel(thickness)}</b><small>at ${thickness.layerHeight.toFixed(2)} mm</small></span><span><b id="medalFinishedThickness">${thickness.finished.toFixed(2)} mm ${thickness.exact ? 'compiled' : 'estimated'}</b><small>finished maximum</small></span></div>
+      <div class="medal-thickness-meta"><span><b id="medalBodyLayerCount">${bodyLayerCountLabel(thickness)}</b><small>at ${thickness.layerHeight.toFixed(2)} mm</small></span><span><b id="medalFinishedThickness">${thickness.finished.toFixed(2)} mm ${thickness.exact ? 'measured from model' : 'estimate'}</b><small>maximum with raised details</small></span></div>
       <small>The body can be 1.2–${DESIGN_LIMITS.baseThicknessMax} mm thick. Raised artwork and the edge sit above it, so the finished maximum may be slightly thicker.</small>
     </section>
     <label class="field-label">Body & raised edge colors</label>
     <div class="medal-material-roles">${materialRole('baseColor', 'Medal body', 'The complete base and ribbon attachment.')}${materialRole('rimColor', 'Raised edge', 'Independent printable color for the selected border.')}</div>
     <label class="field-label">Raised edge style</label>
     <div class="rim-style-picker">${edgeStyles}</div>
-    <div class="dimension-grid edge-dimensions"><label>Edge width<input data-medal-field="rimWidth" type="number" min="0" max="${DESIGN_LIMITS.rimWidthMax}" step="0.1" value="${medal.rimWidth}" /></label><label>Edge height<input data-medal-field="rimHeight" type="number" min="0.1" max="${DESIGN_LIMITS.rimHeightMax}" step="${state.project.profile.layerHeight}" value="${medal.rimHeight}" /></label></div>
+    <details class="friendly-disclosure"><summary>Fine-tune edge size</summary><div class="dimension-grid edge-dimensions"><label>Edge width<input data-medal-field="rimWidth" type="number" min="0" max="${DESIGN_LIMITS.rimWidthMax}" step="0.1" value="${medal.rimWidth}" /></label><label>Edge height<input data-medal-field="rimHeight" type="number" min="0.1" max="${DESIGN_LIMITS.rimHeightMax}" step="${state.project.profile.layerHeight}" value="${medal.rimHeight}" /></label></div></details>
     <small class="field-help">The border is real multicolor geometry in the 3D preview, quote, 3MF, STL, and technical sheet.</small>
     <label class="field-label">Ribbon attachment</label>
     <div class="attachment-picker">${Object.entries(ATTACHMENT_STYLE_INFO).map(([key, info]) => `<button type="button" class="attachment-card ${medal.loopStyle === key ? 'active' : ''}" data-attachment-style="${key}"><b>${attachmentIcons[key]}</b><strong>${escapeHtml(info.label)}</strong><small>${escapeHtml(info.description)}</small></button>`).join('')}</div>
-    <div class="attachment-fields">${ribbonPresets}${attachmentFields}</div>
-    <details class="advanced-disclosure"><summary>Advanced medal construction</summary><div class="dimension-grid"><label>New-object height<input data-medal-field="defaultHeight" type="number" min="0.1" max="${DESIGN_LIMITS.reliefHeightMax}" step="${state.project.profile.layerHeight}" value="${medal.defaultHeight}" /></label><label>Minimum floor<input data-medal-field="minimumFloor" type="number" min="0.6" max="${Math.max(.6, medal.baseThickness - .2)}" step="0.1" value="${medal.minimumFloor}" /></label><label>Edge inset<input data-medal-field="edgeInset" type="number" min="0" max="5" step="0.1" value="${medal.edgeInset}" /></label></div></details>
+    <div class="attachment-fields">${ribbonPresets}<details class="friendly-disclosure"><summary>Fine-tune ribbon opening</summary><div>${attachmentFields}</div></details></div>
+    <details class="advanced-disclosure"><summary>Advanced construction settings</summary><div class="dimension-grid"><label>New-item height<input data-medal-field="defaultHeight" type="number" min="0.1" max="${DESIGN_LIMITS.reliefHeightMax}" step="${state.project.profile.layerHeight}" value="${medal.defaultHeight}" /></label><label>Minimum solid floor<input data-medal-field="minimumFloor" type="number" min="0.6" max="${Math.max(.6, medal.baseThickness - .2)}" step="0.1" value="${medal.minimumFloor}" /></label><label>Edge inset<input data-medal-field="edgeInset" type="number" min="0" max="5" step="0.1" value="${medal.edgeInset}" /></label></div></details>
     <div class="upload-note"><strong>Every attachment is a real through-cut.</strong><br/>Exact layer preview and export use the same printable geometry shown in the model.</div>`;
 }
 
@@ -1507,18 +1607,17 @@ function layerPanel() {
     const icon = element.type === 'text' ? 'T' : element.type === 'image' ? '▧' : element.type === 'path' ? '⌁' : '●';
     const info = OPERATION_INFO[element.operation] || OPERATION_INFO.raise;
     const operationBadge = element.face === 'back' ? '◆ Flat color' : `${info.icon} ${escapeHtml(info.short)}`;
-    return `<div class="layer-row ${element.id === state.selectedId ? 'selected' : ''} ${element.hidden ? 'is-hidden' : ''}" data-layer-id="${escapeHtml(element.id)}" role="button" tabindex="0" aria-label="Select ${escapeHtml(element.name)}">
-      <span class="layer-thumb">${icon}</span>
-      <span class="layer-copy"><strong>${escapeHtml(element.name)}</strong><small><i class="operation-badge ${element.operation}">${operationBadge}</i> · ${element.face === 'back' ? 'Back' : 'Front'}${element.operation === 'cut' ? '' : ` · ${operationValue(element).toFixed(2)} mm`}${element.operation === 'cut' || element.operation === 'engrave' ? '' : ` · ${element.type === 'image' ? `${imageUsedSlots(element, palette.length).length} colors` : escapeHtml(palette[element.color]?.name || `Color ${(element.color ?? 0) + 1}`)}`}</small></span>
+    return `<div class="layer-row ${element.id === state.selectedId ? 'selected' : ''} ${element.hidden ? 'is-hidden' : ''}">
+      <button type="button" class="layer-select" data-layer-id="${escapeHtml(element.id)}" aria-label="Select ${escapeHtml(element.name)}"><span class="layer-thumb">${icon}</span><span class="layer-copy"><strong>${escapeHtml(element.name)}</strong><small><i class="operation-badge ${element.operation}">${operationBadge}</i> · ${element.face === 'back' ? 'Back' : 'Front'}${element.operation === 'cut' ? '' : ` · ${operationValue(element).toFixed(2)} mm`}${element.operation === 'cut' || element.operation === 'engrave' ? '' : ` · ${element.type === 'image' ? `${imageUsedSlots(element, palette.length).length} colors` : escapeHtml(palette[element.color]?.name || `Color ${(element.color ?? 0) + 1}`)}`}</small></span></button>
       <span class="layer-actions">
-        <button data-layer-move="up" data-layer-action-id="${escapeHtml(element.id)}" title="Move forward">↑</button>
-        <button data-layer-move="down" data-layer-action-id="${escapeHtml(element.id)}" title="Move backward">↓</button>
-        <button data-toggle-lock="${escapeHtml(element.id)}" title="${element.locked ? 'Unlock' : 'Lock'}">${element.locked ? '▣' : '▢'}</button>
-        <button data-toggle-layer="${escapeHtml(element.id)}" aria-label="${element.hidden ? 'Show' : 'Hide'} ${escapeHtml(element.name)}">${element.hidden ? '○' : '●'}</button>
+        <button data-layer-move="up" data-layer-action-id="${escapeHtml(element.id)}" title="Place in front of overlapping items" aria-label="Move ${escapeHtml(element.name)} forward">↑</button>
+        <button data-layer-move="down" data-layer-action-id="${escapeHtml(element.id)}" title="Place behind overlapping items" aria-label="Move ${escapeHtml(element.name)} backward">↓</button>
+        <button data-toggle-lock="${escapeHtml(element.id)}" title="${element.locked ? 'Unlock' : 'Lock'}" aria-label="${element.locked ? 'Unlock' : 'Lock'} ${escapeHtml(element.name)}" aria-pressed="${element.locked}">${element.locked ? '▣' : '▢'}</button>
+        <button data-toggle-layer="${escapeHtml(element.id)}" aria-label="${element.hidden ? 'Show' : 'Hide'} ${escapeHtml(element.name)}" aria-pressed="${!element.hidden}">${element.hidden ? '○' : '●'}</button>
       </span>
     </div>`;
   }).join('');
-  return `${panelHeading('Both medal faces', 'Objects')}<p class="panel-intro">Front and back are labeled here. Later objects win where geometry overlaps; select one to move or scale it. Back objects are always flat first-layer colors.</p><div class="layer-list">${rows || '<div class="selection-empty"><b>No objects yet</b><span>Add text, a shape, an image, or draw directly.</span></div>'}</div>`;
+  return `${panelHeading('Front & back', 'Design items')}<p class="panel-intro">Choose any item to edit its wording, size, color, height, or side. Items higher in this list appear in front when designs overlap. Back items always print as flat first-layer colors.</p><div class="layer-list">${rows || '<div class="selection-empty"><b>No design items yet</b><span>Add text, a symbol, an image, or draw directly.</span></div>'}</div>`;
 }
 
 function renderToolPanel() {
@@ -2041,13 +2140,15 @@ function bindToolPanel() {
     const candidate = state.conceptCandidates[0];
     if (!candidate) return;
     replaceProject(structuredClone(candidate));
+    markLoadedDesignProgress();
     toast(`Highest-scoring concept loaded · ${Number(candidate.conceptMeta?.qualityScore).toFixed(1)}/10`);
   });
   $$('[data-use-concept]').forEach(button => button.addEventListener('click', () => {
     const candidate = state.conceptCandidates[Number(button.dataset.useConcept)];
     if (!candidate) return;
     replaceProject(structuredClone(candidate));
-    toast('Concept loaded · front and back objects are editable in the CAD tree');
+    markLoadedDesignProgress();
+    toast('Concept loaded · every front and back design item is editable');
   }));
   $('#ideasToImage')?.addEventListener('click', () => {
     state.conceptBrief = $('#conceptBrief')?.value.trim() || state.conceptBrief || 'running event';
@@ -2075,12 +2176,19 @@ function bindToolPanel() {
   });
   $('#addTextButton')?.addEventListener('click', () => {
     const value = $('#newTextValue').value.trim() || 'YOUR EVENT';
-    const element = { id: uid('text'), type: 'text', name: value.slice(0, 24), text: value, x: 0, y: 0, fontSize: Number($('#newTextSize').value) || 6, fontFamily: 'Arial', weight: Number($('#newTextWeight').value) || 800, rotation: 0, color: Math.min(state.drawing.color, state.project.paletteIds.length - 1), hidden: false, ...operationDefaults() };
+    let fontSize = Number($('#newTextSize').value) || 6;
+    if ($('#newTextAutoFit')?.checked) {
+      const safeWidth = Math.max(8, state.project.medal.width - 2 * (state.project.medal.edgeInset + state.project.medal.rimWidth + 2));
+      fontSize = Math.min(fontSize, safeWidth / Math.max(1, value.length * .59));
+    }
+    const position = $('#newTextPosition')?.value || 'center';
+    const y = position === 'top' ? -state.project.medal.height * .22 : position === 'bottom' ? state.project.medal.height * .22 : 0;
+    const element = { id: uid('text'), type: 'text', name: value.slice(0, 24), text: value, x: 0, y, fontSize: Math.max(1, fontSize), fontFamily: $('#newTextFont')?.value || 'Arial', weight: Number($('#newTextWeight').value) || 800, rotation: 0, color: Math.min(state.drawing.color, state.project.paletteIds.length - 1), hidden: false, ...operationDefaults() };
     queuePlacement(element, 'text');
   });
   $$('[data-add-shape]').forEach(button => button.addEventListener('click', () => {
     const kind = button.dataset.addShape;
-    const element = { id: uid('shape'), type: 'shape', name: `${kind[0].toUpperCase()}${kind.slice(1)}`, shape: kind, x: 0, y: 0, size: 11, rotation: 0, color: Math.min(state.drawing.color, state.project.paletteIds.length - 1), hidden: false, ...operationDefaults() };
+    const element = { id: uid('shape'), type: 'shape', name: `${kind[0].toUpperCase()}${kind.slice(1)}`, shape: kind, x: 0, y: 0, size: Math.max(2, Math.min(DESIGN_LIMITS.shapeSizeMax, Number($('#newShapeSize')?.value) || 12)), rotation: 0, color: Math.min(state.drawing.color, state.project.paletteIds.length - 1), hidden: false, ...operationDefaults() };
     queuePlacement(element, element.name.toLowerCase());
   }));
   $$('[data-attachment-style]').forEach(button => button.addEventListener('click', () => commit(project => {
@@ -2236,18 +2344,14 @@ function bindToolPanel() {
     markOnboardingStep('medal');
   }));
   $$('[data-layer-id]').forEach(row => {
-    const select = event => {
-      if (event.target.closest('button')) return;
+    const select = () => {
+      if (state.liveEdit) { toast('Press OK or Cancel before selecting another object'); return; }
       state.selectedId = row.dataset.layerId;
+      const element = selectedElement();
+      if (element) setCameraPreset(element.face === 'back' ? 'bottom' : 'top');
       renderInspector(); drawMedal(); renderToolPanel();
     };
     row.addEventListener('click', select);
-    row.addEventListener('keydown', event => {
-      if (!['Enter', ' '].includes(event.key)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      select(event);
-    });
   });
   $$('[data-toggle-layer]').forEach(button => button.addEventListener('click', event => {
     event.stopPropagation();
@@ -2278,6 +2382,10 @@ function bindToolPanel() {
     drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
     drop.addEventListener('drop', event => { event.preventDefault(); drop.classList.remove('drag'); if (event.dataTransfer.files[0]) handleAssetFile(event.dataTransfer.files[0]); });
   }
+  $('#uploadPrimary')?.addEventListener('click', () => $('#assetInput').click());
+  $('#createImagePrimary')?.addEventListener('click', () => {
+    const disclosure = $('.image-create-disclosure'); if (!disclosure) return; disclosure.open = true; disclosure.scrollIntoView({ block: 'start', behavior: 'smooth' }); requestAnimationFrame(() => $('#localArtworkBrief')?.focus());
+  });
   $('#importProjectButton')?.addEventListener('click', () => $('#projectInput').click());
   $('#uploadColorsButton')?.addEventListener('click', openGlobalSettings);
   $$('[data-draw-face]').forEach(button => button.addEventListener('click', () => {
@@ -2286,7 +2394,7 @@ function bindToolPanel() {
     const selected = selectedElement();
     if (selected && selected.face !== state.drawing.face) state.selectedId = null;
     if (state.view === '2d') {
-      state.viewer?.setPreset(state.drawing.face === 'back' ? 'bottom' : 'top');
+      setCameraPreset(state.drawing.face === 'back' ? 'bottom' : 'top', { workspace: false });
       $('#workspaceModeHelp').textContent = state.drawing.face === 'back' ? 'Back face auto-aligned · new artwork becomes flat first-layer color' : 'Front face auto-aligned · finish to restore your camera';
       $('#sketchModeBar small').textContent = state.drawing.face === 'back' ? 'Back face · drawing is readable from this side and embedded flush' : 'Front face · drawing is oriented from this viewing side';
     }
@@ -2363,12 +2471,12 @@ function surfaceControlsHtml(element, compact = false) {
   const disabled = element.locked || state.liveEdit ? 'disabled' : '';
   const amountLabel = element.operation === 'raise' ? 'Height' : `Depth · leaves ${(state.project.medal.baseThickness - value).toFixed(2)} mm floor`;
   return `<section class="surface-controls ${compact ? 'compact' : ''}">
-    ${compact ? '' : `<div class="surface-heading"><span><small>Surface operation</small><strong>${escapeHtml(operationDescription(element))}</strong></span><i title="${escapeHtml((OPERATION_INFO[element.operation] || OPERATION_INFO.raise).help)}">?</i></div>`}
+    ${compact ? '' : `<div class="surface-heading"><span><small>How this item prints</small><strong>${escapeHtml(operationDescription(element))}</strong></span><i title="${escapeHtml((OPERATION_INFO[element.operation] || OPERATION_INFO.raise).help)}">?</i></div>`}
     <div class="operation-segmented">${Object.entries(OPERATION_INFO).map(([key, info]) => {
       const impossibleRecess = ['engrave', 'inlay'].includes(key) && maxDepth + .001 < layer;
       const operationDisabled = element.locked || Boolean(state.liveEdit) || impossibleRecess;
       const title = impossibleRecess ? `Increase the gap between base thickness and minimum floor to at least one ${layer.toFixed(2)} mm layer.` : info.help;
-      return `<button type="button" class="${element.operation === key ? 'active' : ''}" data-surface-operation="${key}" title="${escapeHtml(title)}" ${operationDisabled ? 'disabled' : ''}><b>${info.icon}</b>${compact ? info.label.replace('Cut through', 'Cut') : info.label}</button>`;
+      return `<button type="button" class="${element.operation === key ? 'active' : ''}" data-surface-operation="${key}" title="${escapeHtml(title)}" ${operationDisabled ? 'disabled' : ''}><b>${info.icon}</b>${info.label}</button>`;
     }).join('')}</div>
     ${element.operation === 'cut' ? `<div class="operation-note"><b>Full through cut</b><span>Removes ${state.project.medal.baseThickness.toFixed(2)} mm · ${layers}</span></div>` : `<div class="surface-amount-row"><button data-surface-step="-1" aria-label="Decrease by one layer" ${disabled}>−</button><label><span>${amountLabel}</span><div class="unit-input"><input data-surface-field="${field}" type="number" min="${minimumAmount}" max="${maximumAmount}" step="${layer}" value="${value.toFixed(2)}" ${disabled}/><em>mm</em></div></label><button data-surface-step="1" aria-label="Increase by one layer" ${disabled}>＋</button><output>${layers}</output></div>`}
     ${!compact && element.operation === 'inlay' ? `<div class="inlay-top-row"><span>Top above face</span><button data-inlay-top="0" class="${element.inlayHeight === 0 ? 'active' : ''}" ${disabled}>Flush</button><button data-inlay-top-step="-1" aria-label="Lower inlay top one layer" ${disabled}>−</button><div class="unit-input"><input data-inlay-top-field type="number" min="0" max="${DESIGN_LIMITS.inlayHeightMax}" step="${layer}" value="${element.inlayHeight.toFixed(2)}" ${disabled}/><em>mm</em></div><button data-inlay-top-step="1" aria-label="Raise inlay top one layer" ${disabled}>＋</button></div>` : ''}
@@ -2620,8 +2728,8 @@ function renderPushPullGizmo() {
   root.classList.toggle('cut', element.operation === 'cut');
   $('#pushPullLabel').textContent = gizmoDescription(element);
   const fill = $('#gizmoPocketFill');
-  fill.textContent = element.operation === 'inlay' ? 'Empty pocket' : element.operation === 'engrave' ? 'Fill pocket' : 'Make pocket';
-  $('#gizmoCutThrough').textContent = element.operation === 'cut' ? 'Return to raised' : 'Cut through';
+  fill.textContent = element.operation === 'inlay' ? 'Make recessed' : element.operation === 'engrave' ? 'Fill with color' : 'Make recessed';
+  $('#gizmoCutThrough').textContent = element.operation === 'cut' ? 'Return to raised' : 'Make a hole';
 }
 
 function elementFramePoints(element) {
@@ -2670,8 +2778,14 @@ function renderTransformGizmo() {
   positionRect('#transformTopHandle', top); positionRect('#transformHeightHandle', bottom);
   positionRect('#transformTopLeftHandle', points[0]); positionRect('#transformTopRightHandle', points[1]);
   positionRect('#transformCornerHandle', points[2]); positionRect('#transformBottomLeftHandle', points[3]);
+  positionRect('#transformLeftHit', left); positionRect('#transformWidthHit', right);
+  positionRect('#transformTopHit', top); positionRect('#transformHeightHit', bottom);
+  positionRect('#transformTopLeftHit', points[0]); positionRect('#transformTopRightHit', points[1]);
+  positionRect('#transformCornerHit', points[2]); positionRect('#transformBottomLeftHit', points[3]);
   $('#transformMoveHandle').setAttribute('cx', center.x); $('#transformMoveHandle').setAttribute('cy', center.y);
   $('#transformRotateHandle').setAttribute('cx', rotate.x); $('#transformRotateHandle').setAttribute('cy', rotate.y);
+  $('#transformMoveHit').setAttribute('cx', center.x); $('#transformMoveHit').setAttribute('cy', center.y);
+  $('#transformRotateHit').setAttribute('cx', rotate.x); $('#transformRotateHit').setAttribute('cy', rotate.y);
   $('#transformRotateStem').setAttribute('x1', top.x); $('#transformRotateStem').setAttribute('y1', top.y); $('#transformRotateStem').setAttribute('x2', rotate.x); $('#transformRotateStem').setAttribute('y2', rotate.y);
   root.toggleAttribute('hidden', false);
   label.hidden = false; label.style.left = `${points[2].x}px`; label.style.top = `${points[2].y}px`;
@@ -2854,7 +2968,7 @@ function bindPushPullGizmo() {
     $('#pushPullGizmo').classList.remove('dragging');
     clearElementProxy('drag');
     const element = state.project.elements.find(item => item.id === drag.id);
-    if (stageLiveEdit('push-pull', drag.before, drag.id, element ? gizmoDescription(element) : 'Surface operation')) markOnboardingStep('operation');
+    if (stageLiveEdit('push-pull', drag.before, drag.id, element ? gizmoDescription(element) : 'Height change')) markOnboardingStep('operation');
     else renderAll({ panel: state.panel === 'layers' });
   };
   handle.addEventListener('pointerup', finish);
@@ -2923,7 +3037,7 @@ function renderSelectionHud() {
     ? '<i>Locked</i>'
     : element.face === 'back'
       ? '<button type="button" data-move-on-face>Show edit handles</button><i>✓ Flat back color</i>'
-      : '<button type="button" data-move-on-face>Show edit handles</button><button type="button" data-quick-operation="raise">Raise</button><button type="button" data-quick-operation="engrave">Pocket</button><button type="button" data-quick-operation="inlay">Fill</button><button type="button" data-quick-operation="cut">Cut</button>';
+      : '<button type="button" data-move-on-face>Show edit handles</button><button type="button" data-quick-operation="raise">Raised</button><button type="button" data-quick-operation="engrave">Recessed</button><button type="button" data-quick-operation="inlay">Flat color</button><button type="button" data-quick-operation="cut">Hole</button>';
   root.innerHTML = `${directTextEditor}<div class="selection-hud-title"><span class="selection-hud-copy"><small>Selected · ${escapeHtml(element.type)}</small><strong>${escapeHtml(element.name)}</strong><em>${escapeHtml(operationDescription(element))}</em></span><span class="selection-hud-buttons">${editButtons}<button type="button" data-open-inspector>Details</button></span></div>`;
   const textInput = root.querySelector('[data-inline-text-editor]');
   if (textInput) {
@@ -2932,6 +3046,7 @@ function renderSelectionHud() {
       const before = state.inlineTextEditStart;
       if (!before) return;
       state.inlineTextEditStart = null;
+      textInput.blur();
       if (cancelled) {
         state.project = normalizeProject(JSON.parse(before));
         markDirty();
@@ -2957,17 +3072,18 @@ function renderSelectionHud() {
       $('#redoButton').disabled = true;
       markDirty();
       refreshComputed(false);
+      renderSelectionHud();
     });
     textInput.addEventListener('keydown', event => {
-      if (event.key === 'Enter') { event.preventDefault(); finish(); }
-      else if (event.key === 'Escape') { event.preventDefault(); finish({ cancelled: true }); }
+      if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); finish(); }
+      else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); finish({ cancelled: true }); }
     });
     textInput.addEventListener('blur', () => finish());
   }
   root.querySelector('[data-move-on-face]')?.addEventListener('click', () => {
     setInspectionOpen(false);
     setView('3d');
-    state.viewer?.setPreset(element.face === 'back' ? 'bottom' : 'top');
+    setCameraPreset(element.face === 'back' ? 'bottom' : 'top');
     state.viewer?.fit();
     renderTransformGizmo();
     renderPushPullGizmo();
@@ -2995,10 +3111,9 @@ function objectTreeRow(element) {
   const info = OPERATION_INFO[element.operation] || OPERATION_INFO.raise;
   const amount = element.operation === 'cut' ? 'through' : `${operationValue(element).toFixed(2)} mm`;
   const operation = element.face === 'back' ? '◆ Flat color' : `${info.icon} ${escapeHtml(info.short)}`;
-  return `<div class="object-tree-row ${element.id === state.selectedId ? 'selected' : ''} ${element.hidden ? 'hidden-object' : ''}" data-object-tree-id="${escapeHtml(element.id)}" role="button" tabindex="0" aria-label="Select ${escapeHtml(element.name)}">
-    <span class="object-tree-icon">${icon}</span>
-    <span class="object-tree-copy"><strong>${escapeHtml(element.name)}</strong><small>${operation} · ${amount}</small></span>
-    <span class="object-tree-actions"><button type="button" data-tree-lock="${escapeHtml(element.id)}" title="${element.locked ? 'Unlock' : 'Lock'}">${element.locked ? '▣' : '▢'}</button><button type="button" data-tree-hide="${escapeHtml(element.id)}" title="${element.hidden ? 'Show' : 'Hide'}">${element.hidden ? '○' : '●'}</button></span>
+  return `<div class="object-tree-row ${element.id === state.selectedId ? 'selected' : ''} ${element.hidden ? 'hidden-object' : ''}">
+    <button class="object-tree-select" type="button" data-object-tree-id="${escapeHtml(element.id)}" aria-label="Edit ${escapeHtml(element.name)}" aria-pressed="${element.id === state.selectedId}"><span class="object-tree-icon">${icon}</span><span class="object-tree-copy"><strong>${escapeHtml(element.name)}</strong><small>${operation} · ${amount}</small></span></button>
+    <span class="object-tree-actions"><button type="button" data-tree-lock="${escapeHtml(element.id)}" title="${element.locked ? 'Unlock' : 'Lock'}" aria-label="${element.locked ? 'Unlock' : 'Lock'} ${escapeHtml(element.name)}" aria-pressed="${element.locked}">${element.locked ? '▣' : '▢'}</button><button type="button" data-tree-hide="${escapeHtml(element.id)}" title="${element.hidden ? 'Show' : 'Hide'}" aria-label="${element.hidden ? 'Show' : 'Hide'} ${escapeHtml(element.name)}">${element.hidden ? '○' : '●'}</button></span>
   </div>`;
 }
 
@@ -3034,7 +3149,7 @@ function openGroupTransformDialog(groupId, face) {
   const members = projectGroupMembers(groupId, face);
   if (!group || !members.length) { toast('This group has no objects on this face'); return; }
   const bounds = groupWorldBounds(members), lockedCount = members.filter(element => element.locked).length;
-  openDialog('Transform group', `${group.name} · ${face === 'back' ? 'back' : 'front'} face · ${members.length} objects`, `<div class="group-transform-summary"><strong>${bounds.width.toFixed(1)} × ${bounds.height.toFixed(1)} mm</strong><span>Pivot: center of the complete group</span></div>${lockedCount ? `<div class="operation-note"><b>${lockedCount} locked object${lockedCount === 1 ? '' : 's'}</b><span>Unlock the group in the CAD tree before transforming it.</span></div>` : ''}<div class="property-grid"><label><span>Move X</span><div class="unit-input"><input id="groupMoveX" type="number" value="0" step="0.1"><em>mm</em></div></label><label><span>Move Y</span><div class="unit-input"><input id="groupMoveY" type="number" value="0" step="0.1"><em>mm</em></div></label><label><span>Uniform scale</span><div class="unit-input"><input id="groupScale" type="number" value="100" min="1" max="4000" step="1"><em>%</em></div></label><label><span>Rotate</span><div class="unit-input"><input id="groupRotation" type="number" value="0" min="-360" max="360" step="1"><em>°</em></div></label></div><p class="field-help">All values apply together as one undoable CAD operation. Objects keep their own editable text, color, relief, and pocket settings.</p><div class="dialog-actions"><button class="button secondary" data-close-dialog>Cancel</button><button class="button primary" id="applyGroupTransform" ${lockedCount ? 'disabled' : ''}>OK · transform group</button></div>`);
+  openDialog('Arrange group', `${group.name} · ${face === 'back' ? 'back' : 'front'} side · ${members.length} items`, `<div class="group-transform-summary"><strong>${bounds.width.toFixed(1)} × ${bounds.height.toFixed(1)} mm</strong><span>Moves from the center of the group</span></div>${lockedCount ? `<div class="operation-note"><b>${lockedCount} locked item${lockedCount === 1 ? '' : 's'}</b><span>Unlock the group in Design items before changing it.</span></div>` : ''}<div class="property-grid"><label><span>Move left / right</span><div class="unit-input"><input id="groupMoveX" type="number" value="0" step="0.1"><em>mm</em></div></label><label><span>Move up / down</span><div class="unit-input"><input id="groupMoveY" type="number" value="0" step="0.1"><em>mm</em></div></label><label><span>Overall size</span><div class="unit-input"><input id="groupScale" type="number" value="100" min="1" max="4000" step="1"><em>%</em></div></label><label><span>Rotate</span><div class="unit-input"><input id="groupRotation" type="number" value="0" min="-360" max="360" step="1"><em>°</em></div></label></div><p class="field-help">The group moves as one undoable change. Every item keeps its editable text, color, and surface style.</p><div class="dialog-actions"><button class="button secondary" data-close-dialog>Cancel</button><button class="button primary" id="applyGroupTransform" ${lockedCount ? 'disabled' : ''}>Apply to group</button></div>`);
   $('[data-close-dialog]')?.addEventListener('click', closeDialog);
   $('#applyGroupTransform')?.addEventListener('click', () => {
     const moveX = Number($('#groupMoveX').value), moveY = Number($('#groupMoveY').value);
@@ -3082,28 +3197,28 @@ function renderObjectTree() {
     const grouped = new Set();
     const groups = state.project.groups.map(group => {
       const members = elements.filter(element => element.groupId === group.id);
-      if (!members.length) return face === 'front' ? `<details class="object-group"><summary><span>▾ ${escapeHtml(group.name)}</span><small>0</small><button type="button" data-rename-group="${escapeHtml(group.id)}" title="Rename group">✎</button></summary><div class="object-group-items"><div class="object-tree-empty">Empty group</div></div></details>` : '';
+      if (!members.length) return face === 'front' ? `<details class="object-group"><summary><span>▾ ${escapeHtml(group.name)}</span><small>0 items</small></summary><div class="object-group-items"><button type="button" data-rename-group="${escapeHtml(group.id)}">Rename empty group</button><div class="object-tree-empty">Empty group</div></div></details>` : '';
       members.forEach(element => grouped.add(element.id));
       const allLocked = members.every(element => element.locked), allHidden = members.every(element => element.hidden);
       const groupData = `data-group-id="${escapeHtml(group.id)}" data-group-face="${face}"`;
-      return `<details class="object-group" open><summary><span>▾ ${escapeHtml(group.name)}</span><small>${members.length}</small><button type="button" data-rename-group="${escapeHtml(group.id)}" title="Rename group">✎</button></summary><div class="object-group-items"><div class="object-group-toolbar"><button type="button" data-group-transform ${groupData} title="Move, scale, or rotate the group">Transform</button><button type="button" data-group-duplicate ${groupData} title="Duplicate group">Copy</button><button type="button" data-group-lock ${groupData} title="${allLocked ? 'Unlock all' : 'Lock all'}">${allLocked ? 'Unlock' : 'Lock'}</button><button type="button" data-group-hide ${groupData} title="${allHidden ? 'Show all' : 'Hide all'}">${allHidden ? 'Show' : 'Hide'}</button></div>${[...members].reverse().map(objectTreeRow).join('')}</div></details>`;
+      return `<details class="object-group" open><summary><span>▾ ${escapeHtml(group.name)}</span><small>${members.length} items</small></summary><div class="object-group-items"><div class="object-group-toolbar"><button type="button" data-rename-group="${escapeHtml(group.id)}" title="Rename group">Rename</button><button type="button" data-group-transform ${groupData} title="Move, resize, or rotate the group">Arrange</button><button type="button" data-group-duplicate ${groupData} title="Duplicate group">Copy</button><button type="button" data-group-lock ${groupData} title="${allLocked ? 'Unlock all' : 'Lock all'}">${allLocked ? 'Unlock' : 'Lock'}</button><button type="button" data-group-hide ${groupData} title="${allHidden ? 'Show all' : 'Hide all'}">${allHidden ? 'Show' : 'Hide'}</button></div>${[...members].reverse().map(objectTreeRow).join('')}</div></details>`;
     }).join('');
     const ungrouped = [...elements].reverse().filter(element => !grouped.has(element.id));
-    return `<details class="object-face" open data-tree-face="${face}"><summary><span>${face === 'back' ? '↺ Back face' : '◎ Front face'}</span><small>${elements.length} object${elements.length === 1 ? '' : 's'}</small></summary><div class="object-face-body">${groups}${ungrouped.map(objectTreeRow).join('') || (!groups ? '<div class="object-tree-empty">No objects on this face</div>' : '')}</div></details>`;
+    return `<details class="object-face" open data-tree-face="${face}"><summary><span>${face === 'back' ? '↺ Back side · always flat' : '◎ Front side'}</span><small>${elements.length} item${elements.length === 1 ? '' : 's'}</small></summary><div class="object-face-body">${groups}${ungrouped.map(objectTreeRow).join('') || (!groups ? '<div class="object-tree-empty">No design items on this side</div>' : '')}</div></details>`;
   };
   root.className = 'object-tree';
   root.innerHTML = `${renderFace('front')}${renderFace('back')}`;
   root.querySelectorAll('[data-object-tree-id]').forEach(row => {
-    const select = event => {
-      if (event.target.closest('button')) return;
+    const select = () => {
       if (state.liveEdit) { toast('Press OK or Cancel before selecting another object'); return; }
       state.selectedId = row.dataset.objectTreeId;
       const element = selectedElement();
-      if (element && !elementFaceTowardsCamera(element)) state.viewer?.setPreset(element.face === 'back' ? 'bottom' : 'top');
+      // Tree selection is deliberately face-first: novices should never select a
+      // front item while still looking at the back (or vice versa).
+      if (element) setCameraPreset(element.face === 'back' ? 'bottom' : 'top');
       renderInspector(); drawMedal();
     };
     row.addEventListener('click', select);
-    row.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(event); } });
   });
   root.querySelectorAll('[data-tree-hide]').forEach(button => button.addEventListener('click', event => {
     event.stopPropagation();
@@ -3139,7 +3254,7 @@ function renderObjectTree() {
 function openGroupDialog(group = null) {
   if (state.liveEdit) { toast('Press OK or Cancel first'); return; }
   if (!group && state.project.groups.length >= DESIGN_LIMITS.groups) { toast(`This design reached the safe ${DESIGN_LIMITS.groups}-group browser budget`); return; }
-  openDialog(group ? 'Rename group' : 'New object group', group ? 'Keep related artwork together' : 'Create a CAD tree group', `<label class="field-label" for="groupNameInput">Group name</label><input class="text-input" id="groupNameInput" maxlength="60" value="${escapeHtml(group?.name || 'New group')}" autofocus><div class="dialog-actions">${group ? '<button class="button secondary" id="deleteGroup">Remove group</button>' : ''}<button class="button secondary" data-close-dialog>Cancel</button><button class="button primary" id="saveGroup">${group ? 'Rename' : 'Create group'}</button></div>`);
+  openDialog(group ? 'Rename group' : 'New design group', group ? 'Keep related artwork together' : 'Move and resize related items together', `<label class="field-label" for="groupNameInput">Group name</label><input class="text-input" id="groupNameInput" maxlength="60" value="${escapeHtml(group?.name || 'New group')}" autofocus><div class="dialog-actions">${group ? '<button class="button secondary" id="deleteGroup">Remove group</button>' : ''}<button class="button secondary" data-close-dialog>Cancel</button><button class="button primary" id="saveGroup">${group ? 'Rename' : 'Create group'}</button></div>`);
   $('[data-close-dialog]')?.addEventListener('click', closeDialog);
   $('#saveGroup')?.addEventListener('click', () => {
     const name = $('#groupNameInput').value.trim().slice(0, 60) || 'Group';
@@ -3175,7 +3290,7 @@ function renderInspector() {
   const editingLocked = element.locked || Boolean(state.liveEdit);
   const disabled = editingLocked ? 'disabled' : '';
   if (element.type === 'text') {
-    specific = `<label class="field-label">Text · edit directly</label><input class="text-input" data-element-field="text" value="${escapeHtml(element.text)}" maxlength="80" ${disabled}/><div class="control-grid"><label><span>Size</span><div class="unit-input"><input data-element-field="fontSize" data-number type="number" min="1" max="${DESIGN_LIMITS.textSizeMax}" step="0.1" value="${element.fontSize}" ${disabled}/><em>mm</em></div></label><label><span>Weight</span><select class="select-input" data-element-field="weight" data-number ${disabled}><option value="700" ${element.weight === 700 ? 'selected' : ''}>Bold</option><option value="800" ${element.weight === 800 ? 'selected' : ''}>Extra bold</option><option value="900" ${element.weight === 900 ? 'selected' : ''}>Heavy</option></select></label></div>`;
+    specific = `<label class="field-label">Wording · edit directly</label><input class="text-input" data-element-field="text" value="${escapeHtml(element.text)}" maxlength="80" ${disabled}/><div class="control-grid"><label><span>Size</span><div class="unit-input"><input data-element-field="fontSize" data-number type="number" min="1" max="${DESIGN_LIMITS.textSizeMax}" step="0.1" value="${element.fontSize}" ${disabled}/><em>mm</em></div></label><label><span>Weight</span><select class="select-input" data-element-field="weight" data-number ${disabled}><option value="700" ${element.weight === 700 ? 'selected' : ''}>Bold</option><option value="800" ${element.weight === 800 ? 'selected' : ''}>Extra bold</option><option value="900" ${element.weight === 900 ? 'selected' : ''}>Heavy</option></select></label><label><span>Style</span><select class="select-input" data-element-field="fontFamily" ${disabled}><option value="Arial" ${element.fontFamily === 'Arial' ? 'selected' : ''}>Clean</option><option value="Verdana" ${element.fontFamily === 'Verdana' ? 'selected' : ''}>Wide</option><option value="Georgia" ${element.fontFamily === 'Georgia' ? 'selected' : ''}>Classic serif</option></select></label></div>`;
   } else if (element.type === 'shape') {
     specific = `<div class="control-grid"><label><span>Size</span><div class="unit-input"><input data-element-field="size" data-number type="number" min="1" max="${DESIGN_LIMITS.shapeSizeMax}" step="0.1" value="${element.size}" ${disabled}/><em>mm</em></div></label><label><span>Shape</span><input class="text-input" value="${escapeHtml(element.shape)}" disabled/></label></div>`;
   } else if (element.type === 'image') {
@@ -3188,8 +3303,8 @@ function renderInspector() {
   }
   const showColor = !['engrave', 'cut'].includes(element.operation);
   const bounds = elementBounds(element);
-  const transformControls = `<div class="transform-size-card"><div class="transform-size-head"><strong>Size on medal</strong><button type="button" class="aspect-toggle ${element.lockAspect !== false ? 'active' : ''}" data-aspect-toggle ${disabled}>${element.lockAspect !== false ? '🔗 Ratio locked' : '⛓ Free width / height'}</button></div><div class="control-grid"><label><span>Width</span><div class="unit-input"><input data-element-dimension="width" type="number" min="0.5" max="${DESIGN_LIMITS.imageSizeMax}" step="0.1" value="${bounds.width.toFixed(1)}" ${disabled}/><em>mm</em></div></label><label><span>Height</span><div class="unit-input"><input data-element-dimension="height" type="number" min="0.5" max="${DESIGN_LIMITS.imageSizeMax}" step="0.1" value="${bounds.height.toFixed(1)}" ${disabled}/><em>mm</em></div></label></div><div class="scale-presets"><button type="button" data-scale-preset="0.8" ${disabled}>80%</button><button type="button" data-scale-preset="1" ${disabled}>Reset</button><button type="button" data-scale-preset="1.2" ${disabled}>120%</button></div><label class="field-label">Placed on</label><div class="segmented"><button type="button" data-element-face="front" class="${element.face !== 'back' ? 'active' : ''}" ${disabled}>Front</button><button type="button" data-element-face="back" class="${element.face === 'back' ? 'active' : ''}" ${disabled}>Back · flat</button></div>${element.face === 'back' ? '<p class="check-summary">✓ Added color is embedded into the back surface, so the medal stays flat on the build plate.</p>' : ''}<label class="field-label">Group in CAD tree</label><select class="select-input" data-element-group ${disabled}><option value="">No group</option>${state.project.groups.map(group => `<option value="${escapeHtml(group.id)}" ${element.groupId === group.id ? 'selected' : ''}>${escapeHtml(group.name)}</option>`).join('')}</select></div>`;
-  root.innerHTML = `<div class="inspector-header"><div><span class="eyebrow">Selection · ${escapeHtml(element.type)}</span><h2>${escapeHtml(element.name)}</h2></div><span class="inspector-head-actions"><button class="icon-button" id="duplicateElement" title="Duplicate" ${disabled}>＋</button><button class="icon-button inspector-mobile-close" id="closeInspector" aria-label="Close details">×</button></span></div>${surfaceControlsHtml(element)}${state.liveEdit ? '<div class="operation-note"><b>Live edit pending</b><span>Use OK or Cancel on the model before changing object properties.</span></div>' : ''}<div class="inspector-subsection"><span class="eyebrow">Object details</span>${specific}${transformControls}<div class="control-grid"><label><span>X position</span><div class="unit-input"><input data-element-field="x" data-number type="number" step="0.1" value="${element.x.toFixed(1)}" ${disabled}/><em>mm</em></div></label><label><span>Y position</span><div class="unit-input"><input data-element-field="y" data-number type="number" step="0.1" value="${element.y.toFixed(1)}" ${disabled}/><em>mm</em></div></label><label><span>Rotation</span><div class="unit-input"><input data-element-field="rotation" data-number type="number" min="-180" max="180" step="1" value="${element.rotation || 0}" ${disabled}/><em>°</em></div></label></div>${showColor && element.type !== 'image' ? `<label class="field-label">Color</label><div class="element-colors">${colorButtons(element.color, editingLocked)}</div>` : !showColor ? `<div class="operation-note"><b>No added color</b><span>${element.operation === 'cut' ? 'This object removes material.' : 'The exposed base material forms the engraving.'}</span></div>` : ''}<div class="inline-actions"><button id="centerElement" ${disabled}>Center</button><button id="lockElement" ${state.liveEdit ? 'disabled' : ''}>${element.locked ? 'Unlock' : 'Lock'}</button><button class="delete" id="deleteElement" ${disabled}>Delete</button></div></div>`;
+  const transformControls = `<div class="transform-size-card"><div class="transform-size-head"><strong>Size on medal</strong><button type="button" class="aspect-toggle ${element.lockAspect !== false ? 'active' : ''}" data-aspect-toggle ${disabled}>${element.lockAspect !== false ? '🔗 Ratio locked' : '⛓ Free width / height'}</button></div><div class="control-grid"><label><span>Width</span><div class="unit-input"><input data-element-dimension="width" type="number" min="0.5" max="${DESIGN_LIMITS.imageSizeMax}" step="0.1" value="${bounds.width.toFixed(1)}" ${disabled}/><em>mm</em></div></label><label><span>Height</span><div class="unit-input"><input data-element-dimension="height" type="number" min="0.5" max="${DESIGN_LIMITS.imageSizeMax}" step="0.1" value="${bounds.height.toFixed(1)}" ${disabled}/><em>mm</em></div></label></div><div class="scale-presets"><button type="button" data-scale-preset="0.8" ${disabled}>80%</button><button type="button" data-scale-preset="1" ${disabled}>Reset</button><button type="button" data-scale-preset="1.2" ${disabled}>120%</button></div><label class="field-label">Placed on</label><div class="segmented"><button type="button" data-element-face="front" class="${element.face !== 'back' ? 'active' : ''}" ${disabled}>Front</button><button type="button" data-element-face="back" class="${element.face === 'back' ? 'active' : ''}" ${disabled}>Back · flat</button></div>${element.face === 'back' ? '<p class="check-summary">✓ Added color is embedded into the back surface, so the medal stays flat on the build plate.</p>' : ''}<label class="field-label">Design group</label><select class="select-input" data-element-group ${disabled}><option value="">No group</option>${state.project.groups.map(group => `<option value="${escapeHtml(group.id)}" ${element.groupId === group.id ? 'selected' : ''}>${escapeHtml(group.name)}</option>`).join('')}</select></div>`;
+  root.innerHTML = `<div class="inspector-header"><div><span class="eyebrow">Selection · ${escapeHtml(element.type)}</span><h2>${escapeHtml(element.name)}</h2></div><span class="inspector-head-actions"><button class="icon-button" id="duplicateElement" title="Duplicate" aria-label="Duplicate ${escapeHtml(element.name)}" ${disabled}>＋</button><button class="icon-button inspector-mobile-close" id="closeInspector" aria-label="Close details">×</button></span></div>${surfaceControlsHtml(element)}${state.liveEdit ? '<div class="operation-note"><b>Live edit pending</b><span>Use OK or Cancel on the model before changing object properties.</span></div>' : ''}<div class="inspector-subsection"><span class="eyebrow">Object details</span>${specific}${transformControls}<div class="control-grid"><label><span>X position</span><div class="unit-input"><input data-element-field="x" data-number type="number" step="0.1" value="${element.x.toFixed(1)}" ${disabled}/><em>mm</em></div></label><label><span>Y position</span><div class="unit-input"><input data-element-field="y" data-number type="number" step="0.1" value="${element.y.toFixed(1)}" ${disabled}/><em>mm</em></div></label><label><span>Rotation</span><div class="unit-input"><input data-element-field="rotation" data-number type="number" min="-180" max="180" step="1" value="${element.rotation || 0}" ${disabled}/><em>°</em></div></label></div>${showColor && element.type !== 'image' ? `<label class="field-label">Color</label><div class="element-colors">${colorButtons(element.color, editingLocked)}</div>` : !showColor ? `<div class="operation-note"><b>No added color</b><span>${element.operation === 'cut' ? 'This object removes material.' : 'The exposed base material forms the engraving.'}</span></div>` : ''}<div class="inline-actions inspector-object-actions"><button id="fitElement" ${disabled}>Fit inside medal</button><button id="centerElement" ${disabled}>Center</button><button id="duplicateOtherSide" ${disabled}>Copy to ${element.face === 'back' ? 'front' : 'back'}</button><button id="lockElement" ${state.liveEdit ? 'disabled' : ''}>${element.locked ? 'Unlock' : 'Lock'}</button><button class="delete" id="deleteElement" ${disabled}>Delete</button></div></div>`;
   bindInspector();
   renderSelectionHud();
 }
@@ -3334,7 +3449,7 @@ function bindInspector() {
   root.querySelectorAll('[data-element-face]').forEach(button => button.addEventListener('click', () => {
     const face = button.dataset.elementFace;
     commit(project => { const element = project.elements.find(item => item.id === state.selectedId); if (element && !element.locked) element.face = face; });
-    state.viewer?.setPreset(face === 'back' ? 'bottom' : 'top');
+    setCameraPreset(face === 'back' ? 'bottom' : 'top');
     toast(face === 'back'
       ? `${selectedElement()?.name || 'Object'} moved to the back · embedded flush in the first layer`
       : `${selectedElement()?.name || 'Object'} moved to the front face`);
@@ -3350,9 +3465,11 @@ function bindInspector() {
     commit(project => { const target = project.elements.find(item => item.id === state.selectedId); if (target && target.type !== 'image') target.color = colorSlot; });
   }));
   $('#deleteElement')?.addEventListener('click', deleteSelected);
+  $('#fitElement')?.addEventListener('click', fitSelectedInsideMedal);
   $('#centerElement')?.addEventListener('click', () => commit(project => { const element = project.elements.find(item => item.id === state.selectedId); if (element && !element.locked) { element.x = 0; element.y = 0; } }, { panel: state.panel === 'layers' }));
   $('#lockElement')?.addEventListener('click', () => commit(project => { const element = project.elements.find(item => item.id === state.selectedId); if (element) element.locked = !element.locked; }, { panel: state.panel === 'layers' }));
   $('#duplicateElement')?.addEventListener('click', duplicateSelected);
+  $('#duplicateOtherSide')?.addEventListener('click', duplicateSelectedToOtherSide);
   root.querySelector('[data-manage-image-colors]')?.addEventListener('click', openGlobalSettings);
   root.querySelector('[data-remap-image]')?.addEventListener('click', () => reprocessImportedImages('image color remap', state.selectedId));
   root.querySelector('[data-edit-image]')?.addEventListener('click', () => openImageEditor(selectedElement()));
@@ -3397,6 +3514,34 @@ function duplicateSelected() {
   toast('Element duplicated');
 }
 
+function fitSelectedInsideMedal() {
+  const element = selectedElement();
+  if (!element || element.locked) return;
+  let result = null;
+  commit(project => {
+    const target = project.elements.find(item => item.id === state.selectedId);
+    if (!target) return;
+    result = autoFitElementToFace(target);
+    constrainElement(target);
+  }, { panel: state.panel === 'layers' });
+  toast(result?.fitted ? `${element.name} fitted safely inside the medal` : `${element.name} is already safely inside the medal`);
+}
+
+function duplicateSelectedToOtherSide() {
+  const original = selectedElement();
+  if (!original || original.locked) return;
+  const duplicate = structuredClone(original);
+  duplicate.id = uid(original.type);
+  duplicate.face = original.face === 'back' ? 'front' : 'back';
+  duplicate.name = `${original.name} · ${duplicate.face}`;
+  duplicate.x = -original.x;
+  enforceFlatBackArtwork(duplicate, state.project);
+  state.selectedId = duplicate.id;
+  commit(project => project.elements.push(duplicate), { panel: state.panel === 'layers' });
+  setCameraPreset(duplicate.face === 'back' ? 'bottom' : 'top');
+  toast(`${original.name} copied to the ${duplicate.face}`);
+}
+
 function checkStatus(checks) {
   if (checks.some(check => check.level === 'block')) return 'block';
   if (checks.some(check => check.level === 'warn')) return 'warn';
@@ -3422,7 +3567,7 @@ function exactManualColorChecks(result) {
     });
   }
   const collision = [...usage.entries()].find(([, slots]) => slots.size > 1);
-  if (collision) return [{ level: 'block', title: 'Same-layer colors need a multicolor system', message: `The exact compiled layer ${collision[0]} contains ${collision[1].size} filament colors in different regions. Choose a multicolor unit/toolchanger or redesign the colors into separate height bands.` }];
+  if (collision) return [{ level: 'block', title: 'This layer needs more than one color at once', message: `Print layer ${collision[0]} contains ${collision[1].size} filament colors in different areas. Choose a multicolor printer system or redesign the colors as separate height bands.` }];
   const changes = [];
   let previous = null;
   for (const layer of [...usage.keys()].sort((a, b) => a - b)) {
@@ -3462,15 +3607,15 @@ function renderChecks() {
     const diagnostics = state.viewerResult.diagnostics;
     const geometryChecks = [];
     state.checks = state.checks.filter(check => !['Same-layer colors need a multicolor system', 'Manual filament swaps required'].includes(check.title) && !/^Slot \d+ (is out of stock|has low stock)$/.test(check.title));
-    if (diagnostics.ignoredUnsupported > 0) geometryChecks.push({ level: 'block', title: 'Artwork floats over a through-cut', message: `${diagnostics.ignoredUnsupported.toLocaleString()} sampled cells have no material below them. Reorder the objects or move the later raised/inlay artwork.` });
+    if (diagnostics.ignoredUnsupported > 0) geometryChecks.push({ level: 'block', title: 'Artwork would print in the air', message: `Some artwork has no medal material beneath it. Move that artwork away from the hole or change its item order.` });
     if (diagnostics.detachedBaseShells > 0) geometryChecks.push({ level: 'block', title: 'Through-cut creates a loose piece', message: `The medal body is split into ${diagnostics.detachedBaseShells + 1} disconnected shells. Reshape the cut until the body remains one piece.` });
     if (diagnostics.regularizedBands > 0) {
       const volume = Number(diagnostics.regularizedVolumeMm3 || diagnostics.alteredVolumeMm3 || 0);
       const volumeNote = volume > 0 ? `, changing about ${volume.toFixed(2)} mm³` : '';
-      geometryChecks.push({ level: diagnostics.regularizationBlocked ? 'block' : 'warn', title: diagnostics.regularizationBlocked ? 'Topology cleanup exceeds the safe detail budget' : 'Sub-nozzle contacts were regularized', message: `${diagnostics.regularizedBands} ambiguous diagonal contacts were shifted by one ${state.viewerResult.cell.toFixed(3)} mm sample${volumeNote} so the mesh remains manifold. Open Layers and inspect those very small contacts.` });
+      geometryChecks.push({ level: diagnostics.regularizationBlocked ? 'block' : 'warn', title: diagnostics.regularizationBlocked ? 'Tiny touching details cannot be repaired safely' : 'Tiny touching details were made printable', message: `${diagnostics.regularizedBands} very small diagonal contact${diagnostics.regularizedBands === 1 ? ' was' : 's were'} adjusted by ${state.viewerResult.cell.toFixed(3)} mm${volumeNote}. Review those details in Print layers.` });
     }
     const failedValidations = (diagnostics.validations || []).filter(validation => !validation.valid);
-    if (diagnostics.meshValidationFailed || failedValidations.length) geometryChecks.push({ level: 'block', title: 'Exact mesh validation failed', message: diagnostics.meshValidationMessage || `${failedValidations.length} material shell${failedValidations.length === 1 ? '' : 's'} contain open, misoriented, duplicate, or zero-area triangles. Simplify the affected artwork before export.` });
+    if (diagnostics.meshValidationFailed || failedValidations.length) geometryChecks.push({ level: 'block', title: 'The final 3D body is not closed', message: diagnostics.meshValidationMessage || `${failedValidations.length} color part${failedValidations.length === 1 ? '' : 's'} could not be made into a fully closed printable body. Simplify the affected artwork before export.` });
     geometryChecks.push(...exactManualColorChecks(state.viewerResult), ...exactStockChecks(state.viewerResult));
     if (geometryChecks.length) state.checks = state.checks.filter(check => check.level !== 'pass').concat(geometryChecks);
   }
@@ -3479,16 +3624,16 @@ function renderChecks() {
   const geometryBlockers = state.checks.filter(checkBlocksGeometryExport).length;
   const stockBlockers = blockers - geometryBlockers;
   const warnings = state.checks.filter(check => check.level === 'warn').length;
-  const title = status === 'block' ? `${blockers} issue${blockers === 1 ? '' : 's'} to fix` : status === 'warn' ? `${warnings} improvement${warnings === 1 ? '' : 's'}` : 'Ready to print';
+  const title = status === 'block' ? `${blockers} issue${blockers === 1 ? '' : 's'} to fix` : status === 'warn' ? `${warnings} improvement${warnings === 1 ? '' : 's'}` : 'Editor checks passed';
   $('#checkTitle').textContent = title;
   $('#checkSummary').textContent = status === 'block'
     ? geometryBlockers
-      ? 'Printable geometry needs attention before CAD production export.'
+      ? 'Printable geometry needs attention before print-file export.'
       : `${stockBlockers} stock issue${stockBlockers === 1 ? '' : 's'} affect this order; CAD downloads remain available.`
-    : status === 'warn' ? 'Printable with cautions; review before production.' : 'All current features meet the selected profile.';
+    : status === 'warn' ? 'Review these cautions before opening the file in your slicer.' : 'The editor found no current issues. Always verify the downloaded file in your slicer.';
   $('#checkOrb').className = `status-orb ${status}`;
   $('#footerOrb').className = `status-orb ${status}`;
-  $('#footerStatus').textContent = status === 'block' ? `${blockers} blocker${blockers === 1 ? '' : 's'}` : status === 'warn' ? `${warnings} warning${warnings === 1 ? '' : 's'} · ${state.project.profile.nozzle.toFixed(1)} mm` : `Ready for ${state.project.profile.nozzle.toFixed(1)} mm`;
+  $('#footerStatus').textContent = status === 'block' ? `${blockers} issue${blockers === 1 ? '' : 's'} to fix` : status === 'warn' ? `${warnings} caution${warnings === 1 ? '' : 's'} · ${state.project.profile.nozzle.toFixed(1)} mm` : `Checks passed · verify in slicer`;
   $('#issues').innerHTML = state.checks.slice(0, 3).map(check => `<button class="issue ${check.level}" data-issue-element="${escapeHtml(check.elementId || '')}" style="border:0;text-align:left;width:100%"><span>${check.level === 'block' ? '×' : check.level === 'warn' ? '!' : '✓'}</span><span><strong>${escapeHtml(check.title)}</strong>${escapeHtml(check.message)}</span></button>`).join('');
   $$('[data-issue-element]').forEach(issue => issue.addEventListener('click', () => {
     if (issue.dataset.issueElement) { state.selectedId = issue.dataset.issueElement; renderInspector(); drawMedal(); }
@@ -3503,33 +3648,49 @@ function renderPrice() {
 }
 
 function markOnboardingStep(step) {
-  if (state.qaMode) state.qaOnboardingSteps.add(step);
-  else setLocalPreference(`medalforge-onboarding-${step}`, '1');
+  state.qaOnboardingSteps.add(step);
   renderOnboarding();
 }
 
 function resetOnboardingProgress() {
-  if (state.qaMode) state.qaOnboardingSteps.clear();
-  else ['medal', 'add', 'operation', 'inspect'].forEach(step => removeLocalPreference(`medalforge-onboarding-${step}`));
+  state.qaOnboardingSteps.clear();
+}
+
+function restartOnboarding() {
+  resetOnboardingProgress();
   removeLocalPreference('medalforge-onboarding-dismissed');
   state.onboardingDismissed = false;
+}
+
+function markLoadedDesignProgress(project = state.project) {
+  state.qaOnboardingSteps.add('medal');
+  if (project.elements.some(element => !element.hidden)) state.qaOnboardingSteps.add('operation');
+  renderOnboarding();
 }
 
 function renderOnboarding() {
   const root = $('#quickStart');
   if (!root) return;
   if (state.onboardingDismissed || state.view !== '3d') { root.hidden = true; return; }
-  const hasArtwork = state.project.elements.length > 0;
-  const choseMedal = state.qaMode ? state.qaOnboardingSteps.has('medal') : localStorage.getItem('medalforge-onboarding-medal') === '1';
-  const hasOperation = state.qaMode ? state.qaOnboardingSteps.has('operation') : localStorage.getItem('medalforge-onboarding-operation') === '1';
-  const inspected = state.qaMode ? state.qaOnboardingSteps.has('inspect') : localStorage.getItem('medalforge-onboarding-inspect') === '1';
+  const hasArtwork = state.project.elements.some(element => !element.hidden);
+  const choseMedal = state.qaOnboardingSteps.has('medal');
+  const hasOperation = state.qaOnboardingSteps.has('operation');
+  const hasBack = state.project.elements.some(element => !element.hidden && element.face === 'back') || state.qaOnboardingSteps.has('skipBack');
+  const inspected = state.qaOnboardingSteps.has('inspect');
+  const exported = state.qaOnboardingSteps.has('export');
   const steps = [
     [choseMedal, 'Choose the body and ribbon attachment', 'Medal'],
-    [hasArtwork, 'Add text, a shape, image, or drawing', hasArtwork ? 'Done' : 'Add'],
-    [hasOperation, 'Select artwork and drag its blue Z arrow', hasOperation ? 'Done' : 'Select'],
-    [inspected, 'Rotate the model and inspect exact layers', inspected ? 'Done' : 'Layers'],
+    [hasArtwork, 'Add text, a symbol, image, or drawing', hasArtwork ? 'Done' : 'Add'],
+    [hasOperation, 'Choose raised, recessed, flat color, or hole', hasOperation ? 'Done' : 'Select'],
+    [hasBack, 'Add an optional flat-color design to the back', hasBack ? 'Done' : 'Back'],
+    [inspected, 'Review the physical print layers and design checks', inspected ? 'Done' : 'Check'],
+    [exported, 'Save a copy or download the recommended print file', exported ? 'Done' : 'Finish'],
   ];
-  $('#quickStartSteps').innerHTML = steps.map(([done, label, action], index) => `<li class="${done ? 'done' : ''}"><i>${done ? '✓' : index + 1}</i><span>${escapeHtml(label)}</span>${done ? '' : `<button data-onboarding-action="${index}">${action}</button>`}</li>`).join('');
+  const nextIndex = steps.findIndex(step => !step[0]);
+  const visible = nextIndex < 0 ? [[true, 'Your medal is ready for a final slicer check', 'Done']] : [steps[nextIndex]];
+  root.querySelector(':scope > strong').textContent = nextIndex < 0 ? 'Your medal is ready' : `Next step ${nextIndex + 1} of ${steps.length}`;
+  $('#quickStartSteps').innerHTML = visible.map(([done, label, action]) => `<li class="${done ? 'done' : ''}"><i>${done ? '✓' : nextIndex + 1}</i><span>${escapeHtml(label)}</span>${done ? '<button data-onboarding-action="5">Export</button>' : `<span class="quick-start-actions"><button data-onboarding-action="${nextIndex}">${nextIndex === 2 ? 'Choose surface' : action}</button>${nextIndex === 3 ? '<button data-onboarding-skip-back>Skip</button>' : ''}</span>`}</li>`).join('');
+  $('[data-onboarding-skip-back]')?.addEventListener('click', () => { markOnboardingStep('skipBack'); toast('Back design skipped for this medal'); });
   root.hidden = false;
 }
 
@@ -3538,9 +3699,14 @@ function activateOnboardingAction(index) {
   else if (index === 1) { state.panel = 'create'; state.createTool = 'text'; renderAll({ panel: true }); if(window.innerWidth<=900)$('.side-panel')?.classList.add('mobile-open'); }
   else if (index === 2) { state.drawing.mode = 'select'; state.selectedId ||= state.project.elements.at(-1)?.id || null; renderAll(); }
   else if (index === 3) {
+    state.drawing.face = 'back'; state.panel = 'create'; state.createTool = 'text'; setCameraPreset('bottom'); renderAll({ panel: true }); if(window.innerWidth<=900)$('.side-panel')?.classList.add('mobile-open');
+    toast('Back-side artwork is automatically embedded flush into the first print layer');
+  }
+  else if (index === 4) {
     if (!state.inspectionOpen) $('#toggleInspectLayers')?.click();
     else { setView('3d'); setInspectionOpen(true, { focus: true }); }
   }
+  else if (index === 5) showExportDialog();
 }
 
 function renderAll(options = {}) {
@@ -3549,7 +3715,11 @@ function renderAll(options = {}) {
   if (document.activeElement !== $('#projectNameInput')) $('#projectNameInput').value = state.project.name;
   $('#diameterLabel').textContent = state.project.medal.shape === 'circle' ? `Ø ${state.project.medal.diameter} mm` : `${state.project.medal.width} × ${state.project.medal.height} mm`;
   $('#safeDetail').textContent = `≥ ${(state.project.profile.nozzle * 2.25).toFixed(2)} mm`;
-  $$('[data-nozzle]').forEach(button => button.classList.toggle('active', Number(button.dataset.nozzle) === state.project.profile.nozzle));
+  $$('[data-nozzle]').forEach(button => {
+    const active = Number(button.dataset.nozzle) === state.project.profile.nozzle;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-checked', String(active));
+  });
   $('#hardenedNozzle').checked = Boolean(state.project.profile.hardened);
   if (document.activeElement !== $('#layerHeightInput')) $('#layerHeightInput').value = state.project.profile.layerHeight;
   $('#colorSystem').value = state.project.profile.colorSystem;
@@ -3559,6 +3729,7 @@ function renderAll(options = {}) {
   if ($('#removeDesignColor')) $('#removeDesignColor').disabled = state.project.paletteIds.length <= 1;
   if ($('#addDesignColor')) $('#addDesignColor').disabled = state.project.paletteIds.length >= DESIGN_LIMITS.paletteSlots;
   $('#settingsSummary').textContent = `${state.project.profile.nozzle.toFixed(1)} mm · ${state.project.paletteIds.length} colors`;
+  $('#printerDefaultsSummary').textContent = `${state.project.profile.nozzle.toFixed(1)} mm nozzle · ${state.project.profile.layerHeight.toFixed(2)} mm layers`;
   renderPalette();
   if (panel) renderToolPanel();
   if (inspector) renderInspector();
@@ -3681,19 +3852,7 @@ function punchAttachmentPreview(context, metrics) {
 }
 
 function drawShapePath(context, kind, sizePx) {
-  context.beginPath();
-  if (kind === 'circle') context.arc(0, 0, sizePx / 2, 0, Math.PI * 2);
-  else if (kind === 'square') context.roundRect(-sizePx / 2, -sizePx / 2, sizePx, sizePx, Math.max(3, sizePx * .08));
-  else if (kind === 'diamond') { context.moveTo(0,-sizePx/2); context.lineTo(sizePx/2,0); context.lineTo(0,sizePx/2); context.lineTo(-sizePx/2,0); context.closePath(); }
-  else if (kind === 'bolt') {
-    const points = [[-.1,-.55],[.5,-.55],[.15,-.08],[.48,-.08],[-.35,.58],[-.08,.08],[-.45,.08]];
-    points.forEach(([x,y], index) => index ? context.lineTo(x*sizePx,y*sizePx) : context.moveTo(x*sizePx,y*sizePx)); context.closePath();
-  } else if (kind === 'heart') {
-    context.moveTo(0,sizePx*.45); context.bezierCurveTo(-sizePx*.65,0,-sizePx*.48,-sizePx*.48,-sizePx*.2,-sizePx*.48); context.bezierCurveTo(0,-sizePx*.48,0,-sizePx*.25,0,-sizePx*.14); context.bezierCurveTo(0,-sizePx*.25,0,-sizePx*.48,sizePx*.2,-sizePx*.48); context.bezierCurveTo(sizePx*.48,-sizePx*.48,sizePx*.65,0,0,sizePx*.45); context.closePath();
-  } else {
-    const count = kind === 'star' ? 10 : 6;
-    for (let i=0;i<count;i+=1) { const radius = kind === 'star' && i%2 ? sizePx*.22 : sizePx*.5; const angle = -Math.PI/2+i*Math.PI*2/count; if (i) context.lineTo(Math.cos(angle)*radius,Math.sin(angle)*radius); else context.moveTo(Math.cos(angle)*radius,Math.sin(angle)*radius); } context.closePath();
-  }
+  traceShapePath(context, kind, sizePx);
 }
 
 function ensureImage(source) {
@@ -4009,7 +4168,7 @@ function renderLayerPreviewControls() {
     return;
   }
   slider.disabled = false;
-  $('#sliceExactBadge').textContent = 'Exact Z';
+  $('#sliceExactBadge').textContent = 'Physical layer';
   const maxHeight = result.maxHeight;
   const maxLayers = Math.max(1, Math.ceil(maxHeight / state.project.profile.layerHeight));
   if (state.sliceLayer === null) state.sliceLayer = maxLayers;
@@ -4019,7 +4178,7 @@ function renderLayerPreviewControls() {
   $('#sliceLayerLabel').textContent = `${state.sliceLayer} / ${maxLayers} · Z ${z.toFixed(2)} mm`;
   const bottom = medalBottomZ(), top = medalTopZ();
   $('#sliceLayerTitle').textContent = z < bottom ? 'Back relief' : z <= top ? (z > top - .001 ? 'Base top' : 'Inside base') : 'Front relief';
-  $('#sliceStatus').textContent = `${result.cell.toFixed(3)} mm XY sample · compiled operation order · air, base, and filament ownership`;
+  $('#sliceStatus').textContent = `${result.cell.toFixed(3)} mm preview detail · shows empty space, medal body and each filament`;
 }
 
 function buildExactSliceBitmap(result, layer) {
@@ -4178,10 +4337,10 @@ function drawMedal() {
   drawSelection(ctx,metrics);
   drawDrawingOverlay(ctx, metrics);
   ctx.restore();
-  $('#canvasEmpty').hidden = state.view === '3d' || state.project.elements.length > 0;
+  $('#canvasEmpty').hidden = state.project.elements.some(element => !element.hidden);
   const drawHints = { select: 'Select and drag an element to position it', brush: 'Drag to draw a printable stroke', line: 'Drag a snapped printable line · hold Shift for 15° angles', polygon: 'Click corners · Enter finishes · Backspace removes a point', erase: 'Drag across objects to erase them', measure: 'Drag to measure distance and angle' };
   const selected = selectedElement();
-  $('#stageHint').textContent = state.view === '2d' ? drawHints[state.drawing.mode] : state.view === '3d' ? (state.pendingInsert ? `Click a medal face to place ${state.pendingInsert.label} · back placement is flat · Escape cancels` : selected ? (selected.face === 'back' ? `${selected.name} selected · flat back color · drag the object or its handles` : `${selected.name} selected · drag the object to move or its blue arrow for Z`) : 'Drag empty space to orbit · drag artwork to move it') : 'Compiling exact printable layers on this device…';
+  $('#stageHint').textContent = state.view === '2d' ? drawHints[state.drawing.mode] : state.view === '3d' ? (state.pendingInsert ? `Click a medal face to place ${state.pendingInsert.label} · back placement is flat · Escape cancels` : selected ? (selected.face === 'back' ? `${selected.name} selected · flat back color · drag the object or its handles` : `${selected.name} selected · drag the object to move or its blue height handle`) : 'Drag empty space to orbit · drag artwork to move it') : 'Building exact printable layers on this device…';
 }
 
 function canvasPoint(event, metrics = viewMetrics()) {
@@ -4284,15 +4443,15 @@ function pickElementIn3D(clientX, clientY) {
 
 function surfaceProbeText(hit) {
   if (!hit?.element) {
-    if (hit?.surface?.face === 'bottom' || hit?.surface?.normal?.[2] < -.7) return `Bottom face <small>Z ${hit.point.z.toFixed(2)} mm</small>`;
-    if (hit?.surface?.face === 'side') return `Medal side <small>Z ${hit.point.z.toFixed(2)} mm · color ${hit.surface.slot + 1}</small>`;
-    return `Medal face <small>Z ${(hit?.point?.z ?? medalTopZ()).toFixed(2)} mm</small>`;
+    if (hit?.surface?.face === 'bottom' || hit?.surface?.normal?.[2] < -.7) return `Bottom face <small>${hit.point.z.toFixed(2)} mm from the build plate</small>`;
+    if (hit?.surface?.face === 'side') return `Medal side <small>${hit.point.z.toFixed(2)} mm high · color ${hit.surface.slot + 1}</small>`;
+    return `Medal face <small>${(hit?.point?.z ?? medalTopZ()).toFixed(2)} mm from the build plate</small>`;
   }
   const element = hit.element;
-  if (element.face === 'back') return `${escapeHtml(element.name)} · flat back color <small>Z ${medalBottomZ().toFixed(2)} mm · ${element.zDepth.toFixed(2)} mm deep</small>`;
+  if (element.face === 'back') return `${escapeHtml(element.name)} · flat back color <small>${element.zDepth.toFixed(2)} mm color depth</small>`;
   if (element.operation === 'cut') return `${escapeHtml(element.name)} · through cut <small>${medalBottomZ().toFixed(2)}–${medalTopZ().toFixed(2)} mm</small>`;
   const side = element.face === 'back' ? 'back' : 'front';
-  return `${escapeHtml(element.name)} · ${side} ${element.operation === 'inlay' ? 'inlay' : element.operation === 'engrave' ? 'pocket floor' : 'relief surface'} <small>Z ${selectionSurfaceZ(element).toFixed(2)} mm</small>`;
+  return `${escapeHtml(element.name)} · ${side} ${element.operation === 'inlay' ? 'flat color' : element.operation === 'engrave' ? 'recessed surface' : 'raised surface'} <small>${selectionSurfaceZ(element).toFixed(2)} mm from the build plate</small>`;
 }
 
 function updateSurfaceProbe(event, hit, moving = false) {
@@ -4526,6 +4685,11 @@ function openDialog(eyebrow,title,html) {
   requestAnimationFrame(() => dialog.querySelector('[autofocus], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])')?.focus());
 }
 function closeDialog(){
+  if (state.exportJob) {
+    state.exportJob.cancelled = true;
+    state.exportJob.abortController?.abort();
+    state.exportJob.worker?.terminate();
+  }
   if (state.dialogCleanup) {
     const cleanup = state.dialogCleanup;
     state.dialogCleanup = null;
@@ -4557,7 +4721,7 @@ function galleryCardMarkup(key) {
   const selected = state.project.template === key || state.project.template === CURATED_EXAMPLE_INFO[key]?.template;
   return `<button type="button" class="template-card premium-template-card ${selected ? 'selected' : ''}" data-gallery-template="${escapeHtml(key)}" aria-pressed="${selected}">
     <canvas class="template-render" width="360" height="290" data-gallery-preview="${escapeHtml(key)}" aria-hidden="true"></canvas>
-    <span class="template-card-copy"><span class="gallery-card-kicker">Production-ready example</span><strong>${escapeHtml(info.label)}</strong><small>${escapeHtml(info.meta)}</small><span class="gallery-card-facts">${galleryProjectFacts(project).map(fact => `<i>${escapeHtml(fact)}</i>`).join('')}</span></span>
+    <span class="template-card-copy"><span class="gallery-card-kicker">Polished editable example</span><strong>${escapeHtml(info.label)}</strong><small>${escapeHtml(info.meta)}</small><span class="gallery-card-facts">${galleryProjectFacts(project).map(fact => `<i>${escapeHtml(fact)}</i>`).join('')}</span></span>
     <span class="template-use">Open design</span>
   </button>`;
 }
@@ -4650,13 +4814,14 @@ function openTemplateGallery() {
   const gallery = $('#templateGallery');
   const list = $('#templateGalleryList');
   state.galleryReturnFocus = document.activeElement;
-  list.innerHTML = `<section class="gallery-section" aria-labelledby="premiumGalleryHeading"><div class="gallery-section-heading"><div><span>Curated collection</span><h3 id="premiumGalleryHeading">Five medals ready to sell</h3></div><b>${PREMIUM_GALLERY_KEYS.length} editable designs</b></div>${PREMIUM_GALLERY_KEYS.map(galleryCardMarkup).join('')}</section>
-    <section class="gallery-start-section" aria-labelledby="blankGalleryHeading"><div><span>Prefer your own direction?</span><h3 id="blankGalleryHeading">Start from a clean medal</h3><p>The guided setup asks only for the body, size, and ribbon attachment.</p></div><button type="button" class="gallery-blank-action" data-gallery-template="blank">Start blank <span aria-hidden="true">→</span></button></section>`;
+  list.innerHTML = `<section class="gallery-section" aria-labelledby="premiumGalleryHeading"><div class="gallery-section-heading"><div><span>Curated collection</span><h3 id="premiumGalleryHeading">Five polished, print-aware starting points</h3></div><b>${PREMIUM_GALLERY_KEYS.length} editable designs</b></div>${PREMIUM_GALLERY_KEYS.map(galleryCardMarkup).join('')}</section>
+    <section class="gallery-start-section" aria-labelledby="blankGalleryHeading"><div><span>Prefer your own direction?</span><h3 id="blankGalleryHeading">Start from a clean medal</h3><p>The guided setup asks for the body, ribbon attachment, and event details.</p></div><button type="button" class="gallery-blank-action" data-gallery-template="blank">Start blank <span aria-hidden="true">→</span></button></section>`;
   const useTemplate = key => {
     const info = GALLERY_TEMPLATE_INFO[key];
     if (!info) return;
+    if (key === 'blank') { closeTemplateGallery(); openNewDesignWizard(); return; }
     replaceProject(CURATED_EXAMPLE_INFO[key] ? createCuratedExample(key) : createTemplateProject(key));
-    markOnboardingStep('medal');
+    markLoadedDesignProgress();
     closeTemplateGallery();
     toast(`${info.label} loaded · every object is editable · Undo restores your previous medal`);
   };
@@ -4671,7 +4836,7 @@ function openTemplateGallery() {
 }
 
 function wizardProject(wizard = state.wizard) {
-  const project = createTemplateProject(wizard.template);
+  const project = CURATED_EXAMPLE_INFO[wizard.template] ? createCuratedExample(wizard.template) : createTemplateProject(wizard.template);
   if (wizard.template !== 'blank') return normalizeProject(project);
   const size = Math.max(DESIGN_LIMITS.medalMin, Math.min(DESIGN_LIMITS.medalMax, Number(wizard.size) || 60));
   project.medal.shape = wizard.shape;
@@ -4680,7 +4845,18 @@ function wizardProject(wizard = state.wizard) {
   project.medal.height = size;
   project.medal.loopStyle = wizard.attachment;
   Object.assign(project.medal, wizard.attachmentSettings);
-  if (wizard.template === 'blank') project.name = 'Untitled medal';
+  const eventName = String(wizard.eventName || '').trim().slice(0, 60) || 'My event';
+  const distance = String(wizard.distance || '').trim().slice(0, 24);
+  const date = String(wizard.eventDate || '').trim().slice(0, 30);
+  project.name = eventName;
+  const color = Math.min(1, project.paletteIds.length - 1);
+  const safeWidth = Math.max(12, size - 12);
+  const titleSize = Math.max(3, Math.min(7, safeWidth / Math.max(1, eventName.length * .59)));
+  project.elements = [
+    conceptText('Event title', eventName.toUpperCase(), 0, -size * .2, titleSize, color, { zHeight: .6 }),
+    ...(distance ? [conceptText('Distance', distance.toUpperCase(), 0, 0, Math.max(5, Math.min(10, safeWidth / Math.max(1, distance.length * .59))), color, { zHeight: .6 })] : []),
+    ...(date ? [conceptText('Event date', date, 0, size * .2, Math.max(3, Math.min(5.5, safeWidth / Math.max(1, date.length * .59))), color, { zHeight: .6 })] : []),
+  ];
   return normalizeProject(project);
 }
 
@@ -4702,42 +4878,55 @@ function wizardAttachmentFields(wizard) {
 function renderNewDesignWizard() {
   const wizard = state.wizard;
   if (!wizard || !dialog.open) return;
-  const titles = ['Choose a starting point', 'Choose the medal body', 'Choose the ribbon attachment', 'Ready to design'];
-  $('#dialogEyebrow').textContent = `New medal · step ${wizard.step + 1} of 4`;
+  const titles = ['Choose a starting point', 'Choose the medal body', 'Choose the ribbon attachment', wizard.template === 'blank' ? 'Tell us about your event' : 'Personalize the wording in 3D', 'Ready to design'];
+  const attachmentIcons = { single:'▭', double:'▥', eyelet:'◉', slit:'▬', 'open-slit':'↧', none:'○' };
+  $('#dialogEyebrow').textContent = `New medal · step ${wizard.step + 1} of 5`;
   $('#dialogTitle').textContent = titles[wizard.step];
-  const progress = `<div class="wizard-progress" aria-label="Step ${wizard.step + 1} of 4">${[0,1,2,3].map(step => `<i class="${step <= wizard.step ? 'done' : ''}"></i>`).join('')}</div>`;
+  const progress = `<div class="wizard-progress" aria-label="Step ${wizard.step + 1} of 5">${[0,1,2,3,4].map(step => `<i class="${step <= wizard.step ? 'done' : ''}"></i>`).join('')}</div>`;
   let content = '';
   if (wizard.step === 0) {
-    const entries = ['blank', 'photo-night', 'photo-archive', 'photo-tram'];
-    content = `<p class="dialog-lede">Start with a clean black medal, or open one of the photo-inspired medals to learn from a complete, editable front-and-back design.</p><div class="wizard-choice-grid">${entries.map(key => { const info = TEMPLATE_INFO[key]; return `<button type="button" class="wizard-choice ${wizard.template === key ? 'active' : ''}" data-wizard-template="${key}">${templatePreviewMarkup(key, info)}<span>${escapeHtml(info.label)}</span><small>${escapeHtml(info.meta)} · all objects remain editable</small></button>`; }).join('')}</div>`;
+    const entries = ['blank', 'alpine-current-25k', 'showcase-night', 'podium-classic'];
+    content = `<p class="dialog-lede">Start clean, or personalize one of the same polished, printable medals shown in the gallery.</p><div class="wizard-choice-grid" role="radiogroup" aria-label="Starting medal">${entries.map(key => { const info = GALLERY_TEMPLATE_INFO[key]; return `<button type="button" role="radio" aria-checked="${wizard.template === key}" class="wizard-choice ${wizard.template === key ? 'active' : ''}" data-wizard-template="${key}">${templatePreviewMarkup(key, info)}<span>${escapeHtml(info.label)}</span><small>${escapeHtml(info.meta)} · every item stays editable</small></button>`; }).join('')}</div>`;
   } else if (wizard.step === 1) {
     if (wizard.template !== 'blank') {
-      const project = wizardProject(wizard), info = TEMPLATE_INFO[wizard.template];
+      const project = wizardProject(wizard), info = GALLERY_TEMPLATE_INFO[wizard.template];
       content = `<div class="wizard-fixed-example">${templatePreviewMarkup(wizard.template, info)}<div><strong>The example keeps its tested ${project.medal.diameter} mm ${escapeHtml(project.medal.shape)} body</strong><p class="dialog-lede">This prevents its artwork from crossing the printable edge. Once opened, you can still change the body under Medal and the live checks will guide you.</p></div></div>`;
     } else {
       const shapes = [['circle','●','Circle'],['rounded','▣','Rounded square'],['hexagon','⬢','Hexagon'],['scalloped','✿','Scalloped'],['shield','♢','Shield']];
-      content = `<p class="dialog-lede">This only sets the starting body. Oval, shield, and your own closed DXF or drawn outline remain available in Medal.</p><div class="wizard-choice-grid">${shapes.map(([key, icon, label]) => `<button type="button" class="wizard-choice ${wizard.shape === key ? 'active' : ''}" data-wizard-shape="${key}"><b>${icon}</b><span>${label}</span><small>A robust printable ${label.toLowerCase()} base</small></button>`).join('')}</div><label class="wizard-size"><span>Overall size <output id="wizardSizeLabel">${wizard.size} mm</output></span><input id="wizardSize" type="range" min="${DESIGN_LIMITS.medalMin}" max="${DESIGN_LIMITS.medalMax}" step="1" value="${wizard.size}"></label>`;
+      content = `<p class="dialog-lede">Pick the overall shape and size. More unusual outlines remain available later under Medal.</p><div class="wizard-choice-grid" role="radiogroup" aria-label="Medal body shape">${shapes.map(([key, icon, label]) => `<button type="button" role="radio" aria-checked="${wizard.shape === key}" class="wizard-choice ${wizard.shape === key ? 'active' : ''}" data-wizard-shape="${key}"><b>${icon}</b><span>${label}</span><small>A robust printable ${label.toLowerCase()} base</small></button>`).join('')}</div><label class="wizard-size"><span>Overall size <output id="wizardSizeLabel">${wizard.size} mm</output></span><input id="wizardSize" type="range" min="${DESIGN_LIMITS.medalMin}" max="${DESIGN_LIMITS.medalMax}" step="1" value="${wizard.size}"></label>`;
     }
   } else if (wizard.step === 2) {
     if (wizard.template !== 'blank') {
       const project = wizardProject(wizard), attachment = ATTACHMENT_STYLE_INFO[project.medal.loopStyle];
-      content = `<div class="wizard-fixed-example"><b class="wizard-attachment-icon">▥</b><div><strong>${escapeHtml(attachment.label)} is fitted to this example</strong><p class="dialog-lede">It matches the supplied medal photos and stays fully editable in the Medal tool after opening.</p></div></div>`;
+      content = `<div class="wizard-fixed-example"><b class="wizard-attachment-icon">${attachmentIcons[project.medal.loopStyle] || '○'}</b><div><strong>${escapeHtml(attachment.label)} is fitted to this example</strong><p class="dialog-lede">It is fitted to the curated design and stays fully editable in the Medal tool after opening.</p></div></div>`;
     } else {
-      const icons = { single:'▭', double:'▥', eyelet:'◉', slit:'▬', 'open-slit':'↧', none:'○' };
-      content = `<p class="dialog-lede">Pick how the ribbon is fitted. These are real through-cuts with editable dimensions, not decorative marks.</p><div class="attachment-picker wizard-attachments">${Object.entries(ATTACHMENT_STYLE_INFO).map(([key, info]) => `<button type="button" class="attachment-card ${wizard.attachment === key ? 'active' : ''}" data-wizard-attachment="${key}"><b>${icons[key]}</b><strong>${escapeHtml(info.label)}</strong><small>${escapeHtml(info.description)}</small></button>`).join('')}</div><div id="wizardAttachmentFields">${wizardAttachmentFields(wizard)}</div>`;
+      content = `<p class="dialog-lede">Pick how the ribbon is fitted. Standard sizes include the needed printing clearance automatically.</p><div class="attachment-picker wizard-attachments" role="radiogroup" aria-label="Ribbon attachment">${Object.entries(ATTACHMENT_STYLE_INFO).map(([key, info]) => `<button type="button" role="radio" aria-checked="${wizard.attachment === key}" class="attachment-card ${wizard.attachment === key ? 'active' : ''}" data-wizard-attachment="${key}"><b>${attachmentIcons[key]}</b><strong>${escapeHtml(info.label)}</strong><small>${escapeHtml(info.description)}</small></button>`).join('')}</div>${['single','double','slit','open-slit'].includes(wizard.attachment) ? '<div class="ribbon-presets"><span>Ribbon width</span><button type="button" data-wizard-ribbon="22">22 mm</button><button type="button" data-wizard-ribbon="25" class="recommended">25 mm standard</button><button type="button" data-wizard-ribbon="38">38 mm wide</button></div>' : ''}<details class="friendly-disclosure"><summary>Fine-tune the opening</summary><div id="wizardAttachmentFields">${wizardAttachmentFields(wizard)}</div></details>`;
     }
+  } else if (wizard.step === 3) {
+    content = wizard.template === 'blank'
+      ? `<p class="dialog-lede">We will add this as crisp, editable text. You can move, resize, recolor, or delete every line in 3D.</p><div class="tool-form"><label><span>Event name</span><input class="text-input" id="wizardEventName" maxlength="60" value="${escapeHtml(wizard.eventName)}" placeholder="City Night Run"></label><div class="dimension-grid"><label><span>Distance or award</span><input class="text-input" id="wizardDistance" maxlength="24" value="${escapeHtml(wizard.distance)}" placeholder="10 KM"></label><label><span>Date</span><input class="text-input" id="wizardEventDate" maxlength="30" value="${escapeHtml(wizard.eventDate)}" placeholder="18. 9. 2027"></label></div></div>`
+      : `<div class="wizard-fixed-example"><b class="wizard-attachment-icon">✦</b><div><strong>This polished example already includes editable wording</strong><p class="dialog-lede">Open it, click any word directly on the medal, and type your own event name, distance, or date.</p></div></div>`;
   } else {
-    const project = wizardProject(wizard), info = TEMPLATE_INFO[wizard.template], attachment = ATTACHMENT_STYLE_INFO[project.medal.loopStyle];
+    const project = wizardProject(wizard), info = GALLERY_TEMPLATE_INFO[wizard.template], attachment = ATTACHMENT_STYLE_INFO[project.medal.loopStyle];
     const bodySize = project.medal.shape === 'circle' ? `${project.medal.diameter} mm` : `${project.medal.width} × ${project.medal.height} mm`;
-    content = `<div class="wizard-summary"><div class="wizard-medal-preview ${project.medal.shape}">${wizard.template === 'blank' ? 'YOUR DESIGN' : escapeHtml(info.preview)}</div><div><h3>${escapeHtml(project.name)}</h3><p class="dialog-lede">The design opens in the same rotatable 3D workspace. Add an object, move over the front or back face, and click only when its real preview is in the right place.</p><ul><li>${bodySize} ${escapeHtml(project.medal.shape)} body</li><li>${escapeHtml(attachment.label)} ribbon attachment</li><li>${project.paletteIds.length} local filament colors</li><li>${project.elements.length ? `${project.elements.length} editable example objects` : 'Clean black front and back'}</li></ul></div></div>`;
+    content = `<div class="wizard-summary"><div class="wizard-medal-preview ${project.medal.shape}">${wizard.template === 'blank' ? 'YOUR DESIGN' : escapeHtml(info.preview)}</div><div><h3>${escapeHtml(project.name)}</h3><p class="dialog-lede">The design opens in the same rotatable 3D workspace. Add an object, move over the front or back face, and click only when its real preview is in the right place.</p><ul><li>${bodySize} ${escapeHtml(project.medal.shape)} body</li><li>${escapeHtml(attachment.label)} ribbon attachment</li><li>${project.paletteIds.length} local filament colors</li><li>${wizard.template === 'blank' ? `${project.elements.length} editable starter text items` : `${project.elements.length} editable example objects`}</li></ul></div></div>`;
   }
   const back = wizard.step > 0 ? '<button class="button secondary" type="button" id="wizardBack">Back</button>' : '<button class="button secondary" type="button" id="wizardCancel">Cancel</button>';
-  const next = wizard.step < 3 ? '<button class="button primary" type="button" id="wizardNext">Continue</button>' : '<button class="button primary" type="button" id="wizardFinish">Start designing</button>';
+  const next = wizard.step < 4 ? '<button class="button primary" type="button" id="wizardNext">Continue</button>' : '<button class="button primary" type="button" id="wizardFinish">Open in 3D</button>';
   $('#dialogBody').innerHTML = `${progress}${content}<div class="dialog-actions">${back}${next}</div>`;
-  $$('[data-wizard-template]').forEach(button => button.addEventListener('click', () => { wizard.template = button.dataset.wizardTemplate; $$('[data-wizard-template]').forEach(item => item.classList.toggle('active', item === button)); }));
-  $$('[data-wizard-shape]').forEach(button => button.addEventListener('click', () => { wizard.shape = button.dataset.wizardShape; $$('[data-wizard-shape]').forEach(item => item.classList.toggle('active', item === button)); }));
+  $$('[data-wizard-template]').forEach(button => button.addEventListener('click', () => { wizard.template = button.dataset.wizardTemplate; $$('[data-wizard-template]').forEach(item => { const active = item === button; item.classList.toggle('active', active); item.setAttribute('aria-checked', String(active)); }); }));
+  $$('[data-wizard-shape]').forEach(button => button.addEventListener('click', () => { wizard.shape = button.dataset.wizardShape; $$('[data-wizard-shape]').forEach(item => { const active = item === button; item.classList.toggle('active', active); item.setAttribute('aria-checked', String(active)); }); }));
   $('#wizardSize')?.addEventListener('input', event => { wizard.size = Number(event.target.value); $('#wizardSizeLabel').textContent = `${wizard.size} mm`; });
   $$('[data-wizard-attachment]').forEach(button => button.addEventListener('click', () => { wizard.attachment = button.dataset.wizardAttachment; renderNewDesignWizard(); }));
+  $$('[data-wizard-ribbon]').forEach(button => button.addEventListener('click', () => {
+    const width = Number(button.dataset.wizardRibbon);
+    if (['single','double'].includes(wizard.attachment)) { wizard.attachmentSettings.slotWidth = width + 2; wizard.attachmentSettings.loopWidth = width + 7; wizard.attachmentSettings.slotHeight = Math.max(3.2, wizard.attachmentSettings.slotHeight); }
+    else { wizard.attachmentSettings.slitWidth = width + 2; wizard.attachmentSettings.slitHeight = Math.max(3.2, wizard.attachmentSettings.slitHeight); }
+    renderNewDesignWizard();
+  }));
+  $('#wizardEventName')?.addEventListener('input', event => { wizard.eventName = event.target.value; });
+  $('#wizardDistance')?.addEventListener('input', event => { wizard.distance = event.target.value; });
+  $('#wizardEventDate')?.addEventListener('input', event => { wizard.eventDate = event.target.value; });
   $$('[data-wizard-attachment-field]').forEach(input => input.addEventListener('change', () => {
     const minimum = Number(input.min), maximum = Number(input.max), requested = Number(input.value);
     const value = Math.max(Number.isFinite(minimum) ? minimum : requested, Math.min(Number.isFinite(maximum) ? maximum : requested, requested));
@@ -4753,8 +4942,9 @@ function renderNewDesignWizard() {
     const project = wizardProject(wizard);
     closeDialog();
     replaceProject(project);
-    markOnboardingStep('medal');
-    toast('New medal ready · rotate it, then add artwork to either face');
+    if (wizard.template === 'blank') markOnboardingStep('medal');
+    else markLoadedDesignProgress();
+    toast(wizard.template === 'blank' ? 'New medal ready · rotate it, then add artwork to either face' : 'Polished example ready · click any item to personalize it');
   });
 }
 
@@ -4767,6 +4957,9 @@ function openNewDesignWizard() {
     template: 'blank',
     shape: 'circle',
     size: 60,
+    eventName: 'MY EVENT',
+    distance: '10 KM',
+    eventDate: String(new Date().getFullYear()),
     attachment: 'double',
     attachmentSettings: {
       slotWidth: base.medal.slotWidth,
@@ -4779,10 +4972,81 @@ function openNewDesignWizard() {
       attachmentInset: base.medal.attachmentInset,
     },
   };
-  openDialog('New medal · step 1 of 4', 'Choose a starting point', '<div class="export-progress">Opening guided setup…</div>');
+  openDialog('New medal · step 1 of 5', 'Choose a starting point', '<div class="export-progress">Opening guided setup…</div>');
   const wizard = state.wizard;
   state.dialogCleanup = () => { if (state.wizard === wizard) state.wizard = null; };
   renderNewDesignWizard();
+}
+
+function downloadEmergencyBackup(project = state.project) {
+  const bundle = projectBundleForExport(project, state.inventory);
+  downloadBlob(new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' }), `${safeFilename(project.name)}-backup.medalforge.json`);
+  toast('Emergency backup downloaded · keep this file somewhere safe');
+}
+
+async function saveProjectCopy() {
+  if (state.liveEdit) { toast('Apply or restore the current height change first'); return false; }
+  const copy = structuredClone(state.project);
+  copy.id = uid('project');
+  copy.name = `${state.project.name.replace(/\s+copy(?: \d+)?$/i, '')} copy`.slice(0, 60);
+  copy.createdAt = new Date().toISOString();
+  copy.updatedAt = copy.createdAt;
+  replaceProject(copy);
+  markLoadedDesignProgress();
+  const saved = await persistProject();
+  if (saved) { markOnboardingStep('export'); toast(`Saved “${state.project.name}” as a separate medal`); }
+  else {
+    downloadEmergencyBackup();
+    toast('This browser could not save the copy; a backup file was downloaded instead', { error: true });
+  }
+  return saved;
+}
+
+async function showProjectLibrary() {
+  if (state.liveEdit) { toast('Apply or restore the current height change before opening My medals'); return; }
+  const requestId = uid('library');
+  state.libraryRequestId = requestId;
+  openDialog('My medals', 'Loading saved medals', '<div class="export-progress"><span class="spinner"></span> Saving the current medal and opening your local library…</div>');
+  if (state.saveDirty && !await persistProject()) {
+    downloadEmergencyBackup();
+    toast('The current medal could not be saved here, so a backup was downloaded. It is still open and unchanged.', { error: true });
+    closeDialog();
+    return;
+  }
+  if (!dialog.open || state.libraryRequestId !== requestId || $('#dialogTitle')?.textContent !== 'Loading saved medals') return;
+  const library = Array.isArray(state.projectLibrary) ? state.projectLibrary : [];
+  const entries = library.length ? library : [{ id: state.project.id, name: state.project.name, createdAt: state.project.createdAt, updatedAt: state.project.updatedAt, elements: state.project.elements.length, colors: state.project.paletteIds.length }];
+  const cards = entries.map(item => {
+    const current = item.id === state.project.id;
+    const date = item.updatedAt ? new Date(item.updatedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'Saved on this device';
+    const elementCount = Number(item.elements) || 0, colorCount = Number(item.colors) || 1;
+    return `<article class="project-library-card ${current ? 'current' : ''}"><span class="project-library-thumb">${escapeHtml(String(item.name || 'M').trim().slice(0, 2).toUpperCase())}</span><span class="project-library-copy"><strong>${escapeHtml(item.name || 'Untitled medal')}</strong><small>${elementCount} item${elementCount === 1 ? '' : 's'} · ${colorCount} color${colorCount === 1 ? '' : 's'} · ${escapeHtml(date)}</small></span><span class="project-library-actions">${current ? '<b>Open</b>' : `<button type="button" data-open-project="${escapeHtml(item.id)}">Open</button>`}<button type="button" data-copy-project="${escapeHtml(item.id)}">Copy</button></span></article>`;
+  }).join('');
+  const recovery = await loadRecord('projects', `recovery-${state.project.id}`, null);
+  if (!dialog.open || state.libraryRequestId !== requestId || $('#dialogTitle')?.textContent !== 'Loading saved medals') return;
+  openDialog('My medals', 'Saved on this device', `<p class="dialog-lede">MedalForge autosaves the medal you are editing. Use copies when you want to explore a new direction without changing the original.</p><div class="project-library-list">${cards}</div><div class="dialog-actions split-actions"><button class="button secondary" type="button" id="libraryNewMedal">New medal</button><button class="button secondary" type="button" id="libraryOpenFile">Open project file</button>${recovery ? '<button class="button secondary" type="button" id="restoreRecovery">Restore previous version</button>' : ''}<button class="button secondary" type="button" id="downloadCurrentBackup">Download backup</button><button class="button primary" type="button" data-close-dialog>Done</button></div>`);
+  $('[data-close-dialog]')?.addEventListener('click', closeDialog);
+  $('#downloadCurrentBackup')?.addEventListener('click', () => downloadEmergencyBackup());
+  $('#libraryOpenFile')?.addEventListener('click', () => $('#projectInput').click());
+  $('#libraryNewMedal')?.addEventListener('click', () => { closeDialog(); openNewDesignWizard(); });
+  $('#restoreRecovery')?.addEventListener('click', () => {
+    if (!recovery) return;
+    closeDialog(); replaceProject(recovery); markLoadedDesignProgress(); toast('Previous autosaved version restored · Undo returns to the newer medal');
+  });
+  $$('[data-open-project]').forEach(button => button.addEventListener('click', async () => {
+    const project = await loadRecord('projects', button.dataset.openProject, null);
+    if (!project) { toast('That saved medal could not be found on this device', { error: true }); return; }
+    closeDialog(); replaceProject(project); markLoadedDesignProgress(); state.history.length = 0; state.future.length = 0; state.lastSavedSnapshot = snapshot(); toast(`Opened “${state.project.name}”`);
+  }));
+  $$('[data-copy-project]').forEach(button => button.addEventListener('click', async () => {
+    const source = button.dataset.copyProject === state.project.id ? state.project : await loadRecord('projects', button.dataset.copyProject, null);
+    if (!source) { toast('That saved medal could not be found on this device', { error: true }); return; }
+    const copy = structuredClone(source); copy.id = uid('project'); copy.name = `${copy.name} copy`.slice(0, 60); copy.createdAt = new Date().toISOString(); copy.updatedAt = copy.createdAt;
+    closeDialog(); replaceProject(copy); markLoadedDesignProgress();
+    const saved = await persistProject();
+    if (saved) { markOnboardingStep('export'); toast(`Created “${state.project.name}”`); }
+    else { downloadEmergencyBackup(); toast('The copy could not be saved here; a backup file was downloaded instead', { error: true }); }
+  }));
 }
 
 function showProfileInfo() {
@@ -4792,15 +5056,45 @@ function showProfileInfo() {
 }
 
 function showChecksDialog() {
-  const cards=state.checks.map(check=>`<div class="check-card"><span class="status-orb ${check.level}"></span><div><b>${escapeHtml(check.title)}</b><p>${escapeHtml(check.message)}</p></div><small>${check.level==='block'?'Blocker':check.level==='warn'?'Review':'Pass'}</small></div>`).join('');
-  openDialog('Preflight report','Manufacturing checks',`<p class="dialog-lede">Checks use the selected nozzle, layer height, medal dimensions, element bounds, image resolution, and your local filament catalog. Final production still needs a slicer preview and a tested printer profile.</p><div class="checks-full">${cards}</div><div class="dialog-actions"><button class="button primary" data-close-dialog>Back to editor</button></div>`); $('[data-close-dialog]').addEventListener('click',closeDialog);
+  markOnboardingStep('inspect');
+  const cards=state.checks.map((check, index) => {
+    const checkedElement = check.elementId ? state.project.elements.find(element => element.id === check.elementId) : null;
+    const canFit = checkedElement && !checkedElement.locked && check.title.includes('crosses the safe area');
+    const action = check.elementId ? `<span class="check-card-actions"><button type="button" data-locate-check="${index}">Show item</button>${canFit ? `<button type="button" data-fit-check="${index}">Fix automatically</button>` : ''}</span>` : '';
+    return `<div class="check-card"><span class="status-orb ${check.level}"></span><div><b>${escapeHtml(check.title)}</b><p>${escapeHtml(check.message)}</p>${action}</div><small>${check.level==='block'?'Fix':check.level==='warn'?'Review':'Pass'}</small></div>`;
+  }).join('');
+  openDialog('Design checks','Ready for your slicer?',`<p class="dialog-lede">These checks use your medal, artwork, nozzle, layer height and chosen filaments. Fix red items here, review orange advice, then always open the downloaded file in your slicer before printing.</p><div class="checks-full">${cards}</div><div class="dialog-actions"><button class="button primary" data-close-dialog>Back to editor</button></div>`);
+  $('[data-close-dialog]').addEventListener('click',closeDialog);
+  $$('[data-locate-check]').forEach(button => button.addEventListener('click', () => {
+    const check = state.checks[Number(button.dataset.locateCheck)];
+    if (!check?.elementId) return;
+    state.selectedId = check.elementId;
+    closeDialog();
+    const element = selectedElement();
+    if (element) {
+      setView('3d');
+      const preset = element.face === 'back' ? 'bottom' : 'top';
+      state.drawing.face = element.face === 'back' ? 'back' : 'front';
+      setCameraPreset(preset);
+    }
+    renderAll({ panel: state.panel === 'layers' });
+    $('.inspector')?.classList.add('mobile-open');
+    announce(`${selectedElement()?.name || 'Item'} selected`);
+  }));
+  $$('[data-fit-check]').forEach(button => button.addEventListener('click', () => {
+    const check = state.checks[Number(button.dataset.fitCheck)];
+    if (!check?.elementId) return;
+    state.selectedId = check.elementId;
+    fitSelectedInsideMedal();
+    showChecksDialog();
+  }));
 }
 
 function showPriceDialog() {
-  const quantities=[1,10,25,50,100];
+  const quantities=[...new Set([1,10,25,50,100,state.quantity])].sort((a,b)=>a-b);
   const rows=quantities.map(q=>{const quote=calculateQuote(state.project,state.inventory,q,currentGeometryResult());return `<tr class="${q===state.quantity?'selected':''}"><td>${q}</td><td>Kč ${quote.unit.toLocaleString('cs-CZ')}</td><td>Kč ${quote.total.toLocaleString('cs-CZ')}</td></tr>`;}).join('');
   const q=state.quote;
-  openDialog('Instant estimate','Quantity pricing',`<p class="dialog-lede">${q.geometryBased ? 'This estimate uses the compiled mesh volume and each used filament’s density and stock price.' : 'This instant estimate uses medal dimensions and artwork bounds; let the model finish building to replace it with compiled mesh volume.'} Machine time remains an estimate until a production slicer profile is connected.</p><table class="price-table"><thead><tr><th>Quantity</th><th>Per medal</th><th>Estimated total</th></tr></thead><tbody>${rows}</tbody></table><div class="breakdown"><div><small>Material / pc</small><strong>Kč ${q.materialPerPiece}</strong></div><div><small>Machine / pc</small><strong>Kč ${q.machinePerPiece}</strong></div><div><small>Setup</small><strong>Kč ${q.setup}</strong></div><div><small>Material</small><strong>${q.gramsPerPiece.toFixed(1)} g</strong></div></div><div class="server-option"><div><strong>Production-verified server quote</strong><span>Optional paid slicing can be added when the app is hosted. Browser design and safety checks remain available without it.</span></div><button disabled>Coming later</button></div><div class="dialog-actions"><button class="button primary" data-close-dialog>Done</button></div>`); $('[data-close-dialog]').addEventListener('click',closeDialog);
+  openDialog('Price estimate','Price by quantity',`<p class="dialog-lede">${q.geometryBased ? 'This estimate uses the built 3D volume and the density and price of every chosen filament.' : 'This quick estimate uses the medal size and artwork while the detailed 3D volume finishes building.'} It includes material, machine time and setup; confirm the final price after slicing and a test print.</p><table class="price-table"><thead><tr><th>Quantity</th><th>Per medal</th><th>Estimated total</th></tr></thead><tbody>${rows}</tbody></table><div class="breakdown"><div><small>Material / medal</small><strong>Kč ${q.materialPerPiece}</strong></div><div><small>Machine / medal</small><strong>Kč ${q.machinePerPiece}</strong></div><div><small>One-time setup</small><strong>Kč ${q.setup}</strong></div><div><small>Weight / medal</small><strong>${q.gramsPerPiece.toFixed(1)} g</strong></div></div><p class="check-summary">Estimate only · electricity, failed prints, packaging, tax and shipping depend on your production setup.</p><div class="dialog-actions"><button class="button primary" data-close-dialog>Done</button></div>`); $('[data-close-dialog]').addEventListener('click',closeDialog);
 }
 
 const MATERIAL_DENSITY = { PLA: 1.24, PETG: 1.27, ASA: 1.07, ABS: 1.04, TPU: 1.21 };
@@ -4818,9 +5112,21 @@ function inventoryRow(filament) {
 
 function showInventoryDialog() {
   const working=structuredClone(state.inventory);
+  let search = '';
   const captureRows=()=>$$('[data-filament-row]').forEach(row=>{const item=working.find(f=>f.id===row.dataset.filamentRow);if(!item)return;row.querySelectorAll('[data-field]').forEach(input=>{const field=input.dataset.field;if(field==='stockGrams'){item.stockKnown=input.value.trim()!=='';item.stockGrams=item.stockKnown?Number(input.value):0;}else item[field]=input.type==='checkbox'?input.checked:input.type==='number'?Number(input.value):input.value;});});
   const render=()=>{
-    openDialog('Local filament database','Manage stock, pricing & suppliers',`<p class="dialog-lede">Stored only on this device. Density and local Kč/kg make compiled-volume quotes accurate; blank stock means “unknown,” never “available.” Supplier links and reference prices are editable snapshots—record what you actually paid and what is physically in Prague.</p><div class="inventory-wrap"><table class="inventory-table"><thead><tr><th>Color</th><th>Name</th><th>Brand</th><th>Material</th><th>Effect</th><th>g/cm³</th><th>Local Kč/kg</th><th>Stock g</th><th>Supplier / region</th><th>Product URL</th><th>Ref. price</th><th>Currency</th><th>Checked</th><th>Abrasive</th><th></th></tr></thead><tbody>${working.map(inventoryRow).join('')}</tbody></table></div><div class="dialog-actions split-actions"><button class="button secondary" id="addFilament">Add filament</button><button class="button secondary" id="addAsiaCatalog">Add Asian starter catalog</button><button class="button primary" id="saveInventory">Save catalog</button></div>`);
+    openDialog('My filament stock','Colors, effects & prices',`<p class="dialog-lede">Saved only on this device. Start with color, material, effect, price and stock; the fields farther right are optional supplier notes for advanced quoting.</p><label class="inventory-search"><span>Find a filament</span><input id="inventorySearch" type="search" value="${escapeHtml(search)}" placeholder="Search color, brand, material or effect"></label><div class="inventory-wrap"><table class="inventory-table"><thead><tr><th>Color</th><th>Name</th><th>Brand</th><th>Material</th><th>Effect</th><th>g/cm³</th><th>Local Kč/kg</th><th>Stock g</th><th>Supplier / region</th><th>Product URL</th><th>Ref. price</th><th>Currency</th><th>Checked</th><th>Abrasive</th><th></th></tr></thead><tbody>${working.map(inventoryRow).join('')}</tbody></table></div><div class="dialog-actions split-actions"><button class="button secondary" id="addFilament">Add filament</button><button class="button secondary" id="addAsiaCatalog">Add Asian starter catalog</button><button class="button primary" id="saveInventory">Save stock</button></div>`);
+    const filterRows = () => {
+      const query = search.trim().toLowerCase();
+      captureRows();
+      $$('[data-filament-row]').forEach(row => {
+        const filament = working.find(item => item.id === row.dataset.filamentRow);
+        const haystack = filament ? [filament.name, filament.brand, filament.material, filament.effect, filament.supplierRegion].join(' ').toLowerCase() : '';
+        row.hidden = Boolean(query) && !haystack.includes(query);
+      });
+    };
+    $('#inventorySearch')?.addEventListener('input', event => { search = event.target.value; filterRows(); });
+    filterRows();
     $$('[data-remove-filament]').forEach(button=>button.addEventListener('click',()=>{captureRows();if(working.length<=2){toast('Keep at least two catalog colors');return;}if(state.project.paletteIds.includes(button.dataset.removeFilament)){toast('Reassign this filament slot before removing it from the catalog');return;}const index=working.findIndex(item=>item.id===button.dataset.removeFilament);if(index>=0)working.splice(index,1);render();}));
     $$('[data-field="material"]').forEach(select=>select.addEventListener('change',()=>{const density=select.closest('tr').querySelector('[data-field="density"]');if(density&&MATERIAL_DENSITY[select.value])density.value=String(MATERIAL_DENSITY[select.value]);}));
     $('#addFilament').addEventListener('click',()=>{captureRows();working.push({id:uid('filament'),name:'New filament',brand:'Custom',material:'PLA',color:'#7a817e',pricePerKg:650,stockGrams:1000,stockKnown:true,effect:'Solid',density:1.24,abrasive:false,supplierRegion:'',productUrl:'',sourcePrice:0,sourceCurrency:'',priceUpdatedAt:''});render();});
@@ -4853,16 +5159,17 @@ function checkBlocksGeometryExport(check) {
 function renderExportDialog({ preflighting = false, error = '' } = {}) {
   const geometryBlockers = state.checks.filter(checkBlocksGeometryExport);
   const stockBlockers = state.checks.filter(check => check.level === 'block' && !checkBlocksGeometryExport(check));
+  const warnings = state.checks.filter(check => check.level === 'warn').length;
   const blocked=preflighting||Boolean(error)||geometryBlockers.length > 0;
   const blockerList = geometryBlockers.slice(0, 4).map(check => `<li><strong>${escapeHtml(check.title)}</strong><span>${escapeHtml(check.message)}</span></li>`).join('');
   const statusHtml=preflighting
     ? '<div class="export-progress" id="exportProgress"><span class="spinner"></span> Refreshing the latest printable preview and manufacturing checks…</div>'
     : error
-      ? `<div class="export-progress error" id="exportProgress">Exact preflight failed: ${escapeHtml(error)}</div>`
+      ? `<div class="export-progress error" id="exportProgress">Final print check failed: ${escapeHtml(error)}</div>`
       : blocked
         ? `<div class="export-progress error export-blocker-summary" id="exportProgress"><strong>${geometryBlockers.length} printability issue${geometryBlockers.length === 1 ? '' : 's'} must be fixed before 3MF/STL/STEP/PDF export</strong><ul>${blockerList}</ul>${geometryBlockers.length > 4 ? `<small>And ${geometryBlockers.length - 4} more. Open the printability report for the full list.</small>` : ''}<button class="button secondary" type="button" id="reviewExportBlockers">Review all printability checks</button><small>Project JSON and SVG remain available while you edit.</small></div>`
-        : `<div class="export-progress" id="exportProgress">${stockBlockers.length ? 'Geometry is ready. Local stock is insufficient for the selected order, but your CAD downloads remain available.' : 'Editor checks passed.'} 3MF/STL/STEP generation will run the final strict manifold and loose-part preflight locally.</div>`;
-  openDialog('Production files','Export your medal',`<p class="dialog-lede">All files are generated on this computer. 3MF is the preferred multicolor handoff: every filament is a named, aligned object. Import the whole file, then assign each object to its matching slot.</p><div class="export-grid"><button class="export-card recommended" data-export="3mf" ${blocked?'disabled':''}><b>Multicolor 3MF <span>→</span></b><p>One printable package with aligned, named color parts and a filament manifest.</p><small>Recommended for printing</small></button><button class="export-card report-export" data-export="pdf" ${blocked?'disabled':''}><b>Technical quote PDF <span>→</span></b><p>Front, back, isometric and side views with dimensions, weight, colors, print profile and quantity pricing.</p><small>Ready to send</small></button><button class="export-card" data-export="stl" ${blocked?'disabled':''}><b>Per-color STL ZIP <span>→</span></b><p>Separate aligned binary STLs plus a JSON filament map for broad slicer compatibility.</p></button><button class="export-card" data-export="step" ${blocked?'disabled':''}><b>B-Rep STEP <span>→</span></b><p>OpenCascade rebuilds every full-resolution production contour as validated manifold solids. No triangle-mesh conversion.</p><small>CAD exchange · validated before download</small></button><button class="export-card" data-export="svg"><b>2D design SVG <span>→</span></b><p>Editable design reference in physical millimeters. Use 3MF/STL for production.</p></button><button class="export-card" data-export="json"><b>Parametric project JSON <span>→</span></b><p>Versioned feature graph, editable text and operations, source artwork, palette snapshot, and manufacturing settings.</p></button></div>${statusHtml}<div class="server-option"><div><strong>Local browser compute</strong><span>The mesh, validation, pricing, report, and files stay on this device. No server is required.</span></div><button disabled>Local mode</button></div>`);
+        : `<div class="export-progress" id="exportProgress">${stockBlockers.length ? 'The model is ready, but your saved stock is too low for this quantity. Design downloads are still available.' : warnings ? `No blocking issues · review ${warnings} caution${warnings === 1 ? '' : 's'} before printing.` : 'Editor checks passed.'} Print-file export performs one final closed-body and loose-part check on this device.</div>`;
+  openDialog('Check & export','What would you like to do?',`<p class="dialog-lede">Everything is created on this device. For normal multicolor printing, choose the first option and open the downloaded 3MF in your slicer for the final printer check.</p><div class="export-grid"><button class="export-card recommended" data-export="3mf" ${blocked?'disabled':''}><b>Print it myself · 3MF <span>→</span></b><p>One aligned multicolor file with named filament pieces and a color manifest.</p><small>Recommended for PrusaSlicer, OrcaSlicer and Bambu Studio</small></button><button class="export-card" data-export="stl" ${blocked?'disabled':''}><b>Send to a print maker · STL ZIP <span>→</span></b><p>Separate aligned color files for makers who request STL.</p></button><button class="export-card report-export" data-export="pdf" ${blocked?'disabled':''}><b>Send a preview & estimate · PDF <span>→</span></b><p>Front, back, 3D and side views with dimensions, weight, colors and quantity estimate.</p><small>Easy to email for approval</small></button><button class="export-card" data-export="step" ${blocked?'disabled':''}><b>Continue in CAD · STEP <span>→</span></b><p>Validated B-Rep solids rebuilt from the production geometry. Vector objects stay smoother than raster artwork.</p><small>Advanced CAD exchange</small></button></div><details class="friendly-disclosure"><summary>Advanced design files</summary><div class="export-grid"><button class="export-card" data-export="svg"><b>2D design SVG <span>→</span></b><p>Editable two-side design reference in physical millimeters.</p></button><button class="export-card" data-export="json"><b>Editable MedalForge backup <span>→</span></b><p>Reopens every editable word, item, color and manufacturing setting.</p></button></div></details>${statusHtml}<div class="server-option"><div><strong>Private local processing</strong><span>No design or production file is uploaded. The editor reports known design issues; your slicer remains the final authority.</span></div><b>On this device</b></div>`);
   $$('[data-export]').forEach(button=>button.addEventListener('click',()=>runExport(button.dataset.export)));
   $('#reviewExportBlockers')?.addEventListener('click', showChecksDialog);
 }
@@ -4870,28 +5177,74 @@ function renderExportDialog({ preflighting = false, error = '' } = {}) {
 async function showExportDialog() {
   if (state.liveEdit) { toast('Press OK or Cancel before export'); return; }
   if (state.imageReprocessBusy) { toast('Wait for the printable image update to finish before export'); return; }
+  const requestId = uid('export-preflight');
+  state.exportPreflightId = requestId;
   renderExportDialog({ preflighting: true });
   try {
     await ensureGeometryResult(message=>{const progress=$('#exportProgress');if(progress)progress.textContent=message;});
-    if(!dialog.open)return;
+    if(!dialog.open || state.exportPreflightId !== requestId || $('#dialogTitle')?.textContent !== 'What would you like to do?')return;
     renderChecks();renderPrice();renderExportDialog();
   } catch(error) {
-    if(dialog.open)renderExportDialog({ error: error.message });
-    console.error(error);
+    if(dialog.open && state.exportPreflightId === requestId && $('#dialogTitle')?.textContent === 'What would you like to do?')renderExportDialog({ error: error.message });
+    if(error?.name !== 'AbortError')console.error(error);
   }
+}
+
+function productionMeshesForExport(project, job, onProgress) {
+  const options = { production: true, validate: true, maxTriangles: 4_000_000 };
+  if (typeof Worker !== 'function' || typeof OffscreenCanvas !== 'function') return buildMeshes(project, onProgress, options);
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./geometry-worker.js', import.meta.url), { type: 'module', name: 'medalforge-production-export' });
+    job.worker = worker;
+    let settled = false;
+    const finish = callback => value => {
+      if (settled) return;
+      settled = true;
+      job.abortController.signal.removeEventListener('abort', abort);
+      if (job.worker === worker) job.worker = null;
+      worker.terminate();
+      callback(value);
+    };
+    const done = finish(resolve), fail = finish(reject);
+    const abort = () => { const error = new Error('Export cancelled'); error.name = 'AbortError'; fail(error); };
+    job.abortController.signal.addEventListener('abort', abort, { once: true });
+    worker.onmessage = event => {
+      if (event.data?.id !== job.id) return;
+      if (event.data.type === 'progress') { if (!job.cancelled) onProgress(event.data.message); return; }
+      if (event.data.type === 'result') done(event.data.result);
+      else if (event.data.type === 'error') fail(new Error(event.data.message || 'Geometry export failed'));
+    };
+    worker.onerror = event => fail(new Error(event.message || 'Geometry export worker failed'));
+    worker.postMessage({ id: job.id, project, options });
+    if (job.abortController.signal.aborted) abort();
+  });
 }
 
 async function runExport(kind) {
   if (state.liveEdit) { toast('Press OK or Cancel before export'); return; }
   if (state.imageReprocessBusy) { toast('Wait for the printable image update to finish before export'); return; }
+  if (state.exportJob) { toast('An export is already running'); return; }
+  const productionKinds = new Set(['3mf', 'stl', 'pdf', 'step']);
+  if (productionKinds.has(kind) && state.checks.some(checkBlocksGeometryExport)) {
+    toast('Fix the red printability issues before downloading a production file', { error: true });
+    return;
+  }
+  const job = { id: uid('export'), cancelled: false, kind, abortController: new AbortController(), worker: null };
+  state.exportJob = job;
   const project=enrichForExport(state.project,state.inventory); const base=safeFilename(project.name); const progress=$('#exportProgress');
-  const update=message=>{if(progress){progress.classList.remove('error');progress.textContent=message;}};
+  $$('[data-export]').forEach(button => { button.disabled = true; });
+  const ensureActive = () => { if (job.cancelled || state.exportJob !== job) { const error = new Error('Export cancelled'); error.name = 'AbortError'; throw error; } };
+  const complete = message => { markOnboardingStep('export'); if(progress)progress.textContent=message; };
+  const update=message=>{if(!job.cancelled && progress && progress.isConnected && dialog.open){progress.classList.remove('error');progress.innerHTML=`<span>${escapeHtml(message)}</span><button type="button" class="button secondary" id="cancelExportJob">Stop after current step</button>`;$('#cancelExportJob')?.addEventListener('click',()=>{job.cancelled=true;job.abortController.abort();progress.textContent=job.worker ? 'Stopping the geometry job…' : 'Stopping after the current export step…';});}};
   try {
-    if(kind==='json') { const payload=projectBundleForExport(state.project,state.inventory);downloadBlob(new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),`${base}.medalforge.json`);update('Editable project downloaded with its sanitized filament snapshot.');return; }
-    if(kind==='svg') { downloadBlob(new Blob([projectToSvg(project)],{type:'image/svg+xml'}),`${base}.svg`);update('SVG design reference downloaded.');return; }
+    if(kind==='json') { const payload=projectBundleForExport(state.project,state.inventory);ensureActive();downloadBlob(new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),`${base}.medalforge.json`);complete('Editable backup downloaded.');return; }
+    if(kind==='svg') { ensureActive();downloadBlob(new Blob([projectToSvg(project)],{type:'image/svg+xml'}),`${base}.svg`);complete('SVG design reference downloaded.');return; }
+    update('Building the final print-file geometry…');
+    await document.fonts?.ready;
+    const geometry=await productionMeshesForExport(project,job,update);
+    ensureActive();
     if(kind==='pdf') {
       update('Rendering front, back, isometric, and technical views…');
-      const geometry = await ensureGeometryResult(update);
       let viewDataUrl = null;
       if (state.viewer && !modelCanvas.hidden) {
         const camera = state.viewer.cameraState(); const gridVisible = state.viewer.showGrid;
@@ -4904,22 +5257,33 @@ async function runExport(kind) {
         }
       }
       const report = await buildTechnicalSheetPdf({ project: state.project, inventory: state.inventory, geometry, quantity: state.quantity, checks: state.checks, viewDataUrl });
+      ensureActive();
       downloadBlob(report.blob, report.filename);
-      update(`Technical PDF downloaded · ${report.model.quote.gramsPerPiece.toFixed(1)} g · Kč ${report.model.quote.total.toLocaleString('cs-CZ')} total estimate.`);
+      complete(`PDF downloaded · ${report.model.quote.gramsPerPiece.toFixed(1)} g · Kč ${report.model.quote.total.toLocaleString('cs-CZ')} total estimate.`);
       return;
     }
-    update('Starting browser geometry engine…'); await new Promise(resolve=>setTimeout(resolve,30));
-    const geometry=await buildMeshes(project,update,{production:true,validate:true,maxTriangles:4_000_000});
     const {meshes}=geometry;
     if(kind==='step'){
-      update('Preparing full-resolution contours for the local B-Rep kernel…');
-      const result=await columnsToStep(geometry.sliceData,update);
+      update('Rebuilding production contours as validated B-Rep solids…');
+      const result=await columnsToStep(geometry.sliceData,update,{signal:job.abortController.signal});
+      ensureActive();
       downloadBlob(result.blob,`${base}.step`);
-      update(`STEP downloaded · ${result.stats.solidCount} validated solid ${result.stats.solidCount===1?'body':'bodies'} · ${(result.stats.sourceVolumeMm3/1000).toFixed(2)} cm³.`);
+      complete(`STEP downloaded · ${result.stats.solidCount} validated solid ${result.stats.solidCount===1?'body':'bodies'} · ${(result.stats.sourceVolumeMm3/1000).toFixed(2)} cm³.`);
     }
-    if(kind==='3mf'){update('Streaming and compressing color parts into 3MF…');await new Promise(resolve=>setTimeout(resolve,10));downloadBlob(await meshesTo3mf(project,meshes),`${base}.3mf`);update(`3MF downloaded with ${meshes.length} aligned color part${meshes.length===1?'':'s'} at full geometric detail.`);}
-    if(kind==='stl'){update('Packaging aligned binary STLs…');const blob=await meshesToStlZip(project,meshes);downloadBlob(blob,`${base}-stl-parts.zip`);update(`STL ZIP downloaded with ${meshes.length} printable part${meshes.length===1?'':'s'}.`);}
-  } catch(error) { if(progress){progress.classList.add('error');progress.textContent=`Export failed: ${error.message}`;} console.error(error); }
+    if(kind==='3mf'){update('Streaming and compressing color parts into 3MF…');await new Promise(resolve=>setTimeout(resolve,10));const blob=await meshesTo3mf(project,meshes);ensureActive();downloadBlob(blob,`${base}.3mf`);complete(`3MF downloaded with ${meshes.length} aligned filament piece${meshes.length===1?'':'s'}.`);}
+    if(kind==='stl'){update('Packaging aligned binary STLs…');const blob=await meshesToStlZip(project,meshes);ensureActive();downloadBlob(blob,`${base}-stl-parts.zip`);complete(`STL ZIP downloaded with ${meshes.length} printable part${meshes.length===1?'':'s'}.`);}
+  } catch(error) {
+    if(progress && dialog.open){progress.classList.toggle('error', error.name !== 'AbortError');progress.textContent=error.name === 'AbortError' ? 'Export cancelled. No download was started.' : `Export failed: ${error.message}`;}
+    if(error.name !== 'AbortError')console.error(error);
+  } finally {
+    job.abortController.abort();
+    job.worker?.terminate();
+    if(state.exportJob===job)state.exportJob=null;
+    if(dialog.open) {
+      const blocked = state.checks.some(checkBlocksGeometryExport);
+      $$('[data-export]').forEach(button => { button.disabled = productionKinds.has(button.dataset.export) && blocked; });
+    }
+  }
 }
 
 function fileToDataUrl(file) { return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(reader.error);reader.readAsDataURL(file);}); }
@@ -5356,8 +5720,8 @@ function renderImagePartsPanel(session) {
   const availableDepth = Math.max(.05, state.project.medal.baseThickness - state.project.medal.minimumFloor);
   const amountMaximum = selected.operation === 'raise' ? DESIGN_LIMITS.reliefHeightMax : availableDepth;
   const textReplacement = selectedRegion.role === 'text' ? `<div class="image-text-replacement"><div><strong>Likely lettering detected</strong><small>${session.textDetectionStatus || 'Type the wording you see to rebuild it as crisp, editable text.'}</small></div><label><span>Editable wording</span><input class="text-input" id="imagePartText" maxlength="80" value="${escapeHtml(selected.text || '')}" placeholder="Type this line exactly"></label><label class="check-row compact-check"><input type="checkbox" id="imagePartAsText" ${selected.replaceWithText ? 'checked' : ''} ${selected.text?.trim() ? '' : 'disabled'}><span><strong>Replace pixels with real text</strong><small>Sharper export, editable font and wording after placement.</small></span></label></div>` : '';
-  const detectedMedalHint = session.medalFaceDetection ? '<small>Face and rim colors are applied to the medal itself, so they are unchecked by default.</small>' : '<small>Each checked part becomes its own CAD object.</small>';
-  root.innerHTML = `<div class="image-parts-head"><span><strong>Click the picture or a part</strong>${detectedMedalHint}</span><button type="button" id="includeAllImageParts">Keep all</button></div><div class="image-parts-list">${rows}</div><div class="image-part-inspector"><div class="image-part-inspector-head"><strong>Selected object</strong><button type="button" id="onlyThisImagePart">Use only this</button></div><label><span>Name</span><input class="text-input" id="imagePartName" maxlength="40" value="${escapeHtml(selected.name)}"></label>${textReplacement}<div class="property-grid"><label><span>Filament color</span><div class="select-with-add-color"><select class="select-input" id="imagePartColor">${palette.map((item, slot) => `<option value="${slot}" ${slot === selected.color ? 'selected' : ''}>${slot + 1} · ${escapeHtml(item.name)}</option>`).join('')}</select>${inlineAddColorButtonHtml('image-part', { compact: true })}</div></label><label><span>Surface</span><select class="select-input" id="imagePartOperation"><option value="raise" ${selected.operation === 'raise' ? 'selected' : ''}>Raised</option><option value="inlay" ${selected.operation === 'inlay' ? 'selected' : ''}>Color inlay</option><option value="engrave" ${selected.operation === 'engrave' ? 'selected' : ''}>Engraved</option><option value="cut" ${selected.operation === 'cut' ? 'selected' : ''}>Through hole</option></select></label></div><label class="image-part-amount ${selected.operation === 'cut' ? 'disabled' : ''}"><span>${selected.operation === 'raise' ? 'Height' : 'Depth'} <small>${layerCountLabel(selected.amount)}</small></span><div class="unit-input"><input id="imagePartAmount" type="number" min="${state.project.profile.layerHeight}" max="${amountMaximum}" step="${state.project.profile.layerHeight}" value="${selected.amount.toFixed(2)}" ${selected.operation === 'cut' ? 'disabled' : ''}><em>mm</em></div></label><p class="field-help">After placement, click this object in 3D to move, scale, recolor, or pull its blue height arrow.</p></div>`;
+  const detectedMedalHint = session.medalFaceDetection ? '<small>Face and rim colors are applied to the medal itself, so they are unchecked by default.</small>' : '<small>Each checked part becomes its own editable design item.</small>';
+  root.innerHTML = `<div class="image-parts-head"><span><strong>Click the picture or a part</strong>${detectedMedalHint}</span><button type="button" id="includeAllImageParts">Keep all</button></div><div class="image-parts-list">${rows}</div><div class="image-part-inspector"><div class="image-part-inspector-head"><strong>Selected object</strong><button type="button" id="onlyThisImagePart">Use only this</button></div><label><span>Name</span><input class="text-input" id="imagePartName" maxlength="40" value="${escapeHtml(selected.name)}"></label>${textReplacement}<div class="property-grid"><label><span>Filament color</span><div class="select-with-add-color"><select class="select-input" id="imagePartColor">${palette.map((item, slot) => `<option value="${slot}" ${slot === selected.color ? 'selected' : ''}>${slot + 1} · ${escapeHtml(item.name)}</option>`).join('')}</select>${inlineAddColorButtonHtml('image-part', { compact: true })}</div></label><label><span>Surface</span><select class="select-input" id="imagePartOperation"><option value="raise" ${selected.operation === 'raise' ? 'selected' : ''}>Raised</option><option value="inlay" ${selected.operation === 'inlay' ? 'selected' : ''}>Flat color</option><option value="engrave" ${selected.operation === 'engrave' ? 'selected' : ''}>Recessed</option><option value="cut" ${selected.operation === 'cut' ? 'selected' : ''}>Through hole</option></select></label></div><label class="image-part-amount ${selected.operation === 'cut' ? 'disabled' : ''}"><span>${selected.operation === 'raise' ? 'Height' : 'Depth'} <small>${layerCountLabel(selected.amount)}</small></span><div class="unit-input"><input id="imagePartAmount" type="number" min="${state.project.profile.layerHeight}" max="${amountMaximum}" step="${state.project.profile.layerHeight}" value="${selected.amount.toFixed(2)}" ${selected.operation === 'cut' ? 'disabled' : ''}><em>mm</em></div></label><p class="field-help">After placement, click this object in 3D to move, scale, recolor, or drag its blue height handle.</p></div>`;
   bindInlineAddColorButtons(root);
   root.querySelectorAll('[data-part-select]').forEach(button => button.addEventListener('click', () => {
     session.selectedPartKey = button.dataset.partSelect; renderImagePartsPanel(session); drawImageEditorPreview(session.latest, session, session.previewToken);
@@ -6087,7 +6451,7 @@ async function handleProjectFile(file) {
     if(restored.missing.length)throw new Error(`The project references ${restored.missing.length} filament${restored.missing.length===1?'':'s'} missing from both this device and its saved snapshot.`);
     state.inventory=restored.inventory;
     if(restored.added.length||restored.remapped.length)await saveUserRecord('inventory','catalog',state.inventory);
-    replaceProject(restored.project);closeDialog();
+    replaceProject(restored.project); markLoadedDesignProgress(); closeDialog();
     const note=restored.remapped.length?` · preserved ${restored.remapped.length} conflicting local color${restored.remapped.length===1?'':'s'} under new project IDs`:restored.added.length?` · restored ${restored.added.length} filament${restored.added.length===1?'':'s'} to local stock`:'';
     toast(`Project opened${note}`);
   } catch(error){toast(`Could not open project: ${error.message}`);}
@@ -6250,15 +6614,16 @@ function setView(mode) {
   $('.size-chip').hidden = hasViewer;
   $('.compute-chip').hidden = false;
   $('.stage-actions').classList.toggle('model-active', hasViewer);
+  $('#zoomLabel').textContent = hasViewer ? '3D' : `${Math.round(state.zoom * 100)}%`;
   if (isModel) {
     if (previousView === '2d' && state.sketchCamera && state.viewer) {
       state.viewer.restoreCamera(state.sketchCamera);
-      $('#projectionToggle').textContent = state.sketchCamera.projection === 'orthographic' ? 'Orthographic' : 'Perspective';
+      updateProjectionToggle(state.sketchCamera.projection);
     }
     state.sketchCamera = null;
     $('#canvasEmpty').hidden = true;
     $('#workspaceModeLabel').textContent = 'Model workspace';
-    $('#workspaceModeHelp').textContent = 'Drag artwork to move · drag its Z arrow for height';
+    $('#workspaceModeHelp').textContent = 'Click artwork to edit · drag the blue height handle to raise or recess';
     $('#stageHint').textContent = state.pendingInsert ? `Click the medal face to place ${state.pendingInsert.label}` : 'Drag artwork to move · drag empty space to orbit · Alt-drag through artwork to orbit';
     requestAnimationFrame(() => { state.viewer?.resize(); ensure3DModel(); });
   } else {
@@ -6269,9 +6634,9 @@ function setView(mode) {
     }
     else {
       if (previousView !== '2d' && state.viewer) state.sketchCamera = state.viewer.cameraState();
-      state.viewer?.setPreset(state.drawing.face === 'back' ? 'bottom' : 'top');
+      setCameraPreset(state.drawing.face === 'back' ? 'bottom' : 'top', { workspace: false });
       state.viewer?.setProjection('orthographic');
-      $('#projectionToggle').textContent = 'Orthographic';
+      updateProjectionToggle('orthographic');
       $('#workspaceModeLabel').textContent = 'Sketching inside the 3D model';
       $('#workspaceModeHelp').textContent = `${state.drawing.face === 'back' ? 'Back' : 'Front'} face auto-aligned · finish to restore your camera`;
       $('#sketchModeBar small').textContent = `${state.drawing.face === 'back' ? 'Back' : 'Front'} face · drawing is oriented from this viewing side`;
@@ -6449,6 +6814,14 @@ function bindViewerControls() {
   let clickStart = null;
   let hoverFrame = 0;
   let pendingHoverEvent = null;
+  const applyCameraPreset = (preset, speak = false) => {
+    state.hoveredId = null;
+    $('#surfaceProbe').hidden = true;
+    clearElementProxy('hover');
+    state.viewer?.clearHoverSurface();
+    if (state.view === '2d' && preset !== 'top') finishSketchMode();
+    setCameraPreset(preset, { speak });
+  };
   const scheduleHover = event => {
     if (event.buttons || state.modelDrag || state.gizmoDrag || state.pendingInsert || state.view !== '3d') return;
     pendingHoverEvent = { clientX: event.clientX, clientY: event.clientY };
@@ -6471,6 +6844,7 @@ function bindViewerControls() {
   };
   modelCanvas.addEventListener('pointerdown', event => {
     if (state.view !== '3d') return;
+    clickStart = null;
     $('#surfaceProbe').hidden = true;
     state.hoveredId = null;
     state.viewer?.clearHoverSurface();
@@ -6508,6 +6882,11 @@ function bindViewerControls() {
           }
         }
       }
+    }
+    if (!state.pendingInsert && (!clickStart?.hitId || event.altKey || event.button !== 0 || event.shiftKey)) {
+      $$('[data-camera]').forEach(item => item.classList.toggle('active', item.dataset.camera === 'iso'));
+      $('#workspaceModeLabel').textContent = '3D medal';
+      $('#workspaceModeHelp').textContent = 'Drag empty space to rotate · click artwork to edit it';
     }
     if (state.pendingInsert && event.button === 0) {
       event.preventDefault(); event.stopImmediatePropagation(); modelCanvas.setPointerCapture(event.pointerId);
@@ -6600,7 +6979,7 @@ function bindViewerControls() {
       renderAll({ panel: state.panel === 'layers' });
       toast(pending.element.face === 'back'
         ? `${assembly ? `${placedElements.length} editable parts` : pending.element.name} placed on the back · embedded flush in the first layer`
-        : `${assembly ? `${placedElements.length} editable parts` : pending.element.name} placed on the front · drag a part to move it or use its blue arrow for depth`);
+        : `${assembly ? `${placedElements.length} editable parts` : pending.element.name} placed on the front · drag a part to move it or use its blue height handle`);
       return;
     }
     const point = state.viewer.screenToDesignPlane(event.clientX, event.clientY, medalTopZ() + .001);
@@ -6612,9 +6991,9 @@ function bindViewerControls() {
     renderSelectionHud();
     if (hit) $('#stageHint').textContent = hit.face === 'back'
       ? `${hit.name} selected · flat first-layer color · drag the handles to move, scale, or rotate`
-      : `${hit.name} selected · drag its blue Z arrow up to raise or down to pocket/cut`;
+    : `${hit.name} selected · drag the blue height handle up to raise or down to recess`;
     else if (surfaceHit?.surface?.face === 'bottom') $('#stageHint').textContent = 'Back face · artwork placed here is readable from the back and embedded flush in the first layer';
-    else if (surfaceHit?.surface?.face === 'side') $('#stageHint').textContent = `Side face · Z ${surfaceHit.point.z.toFixed(2)} mm · orbit freely; side-face extrusion needs the future solid-kernel tier`;
+    else if (surfaceHit?.surface?.face === 'side') $('#stageHint').textContent = 'Medal edge · rotate freely; artwork can currently be placed on the front or back';
   });
   modelCanvas.addEventListener('pointercancel', event => {
     if (state.modelDrag?.pointerId === event.pointerId) {
@@ -6631,7 +7010,7 @@ function bindViewerControls() {
     if (state.liveEdit || state.pendingInsert || state.view !== '3d') return;
     const picked = pickElementIn3D(event.clientX, event.clientY);
     const planePoint = state.viewer?.screenToDesignPlane(event.clientX, event.clientY, medalTopZ());
-    const hit = picked?.element || (planePoint ? hitElement(planePoint) : null) || selectedElement();
+    const hit = picked?.element || (planePoint ? hitElement(planePoint) : null);
     if (!hit || hit.type !== 'text') return;
     event.preventDefault(); event.stopImmediatePropagation();
     state.selectedId = hit.id;
@@ -6652,11 +7031,32 @@ function bindViewerControls() {
     renderTransformGizmo();
     if (state.view === '2d') drawMedal();
   });
-  $$('[data-camera]').forEach(button => button.addEventListener('click', () => {
-    if (state.view === '2d' && button.dataset.camera !== 'top') finishSketchMode();
-    $$('[data-camera]').forEach(item => item.classList.toggle('active', item === button));
-    state.viewer?.setPreset(button.dataset.camera);
-  }));
+  $$('[data-camera]').forEach(button => button.addEventListener('click', () => applyCameraPreset(button.dataset.camera, true)));
+  modelCanvas.addEventListener('keydown', event => {
+    if (!state.viewer || state.view !== '3d') return;
+    const key = event.key.toLowerCase();
+    if (['0', '1', '2', 'f', '+', '=', '-', '_', 'arrowleft', 'arrowright', 'arrowup', 'arrowdown'].includes(key)) {
+      event.preventDefault();
+      event.stopPropagation();
+    } else return;
+    if (key === '0') applyCameraPreset('iso', true);
+    else if (key === '1') applyCameraPreset('top', true);
+    else if (key === '2') applyCameraPreset('bottom', true);
+    else if (key === 'f') { state.viewer.fit(); announce('Medal fitted in view'); }
+    else if (key === '+' || key === '=') state.viewer.zoom(.9);
+    else if (key === '-' || key === '_') state.viewer.zoom(1.1);
+    else {
+      const dx = key === 'arrowleft' ? -18 : key === 'arrowright' ? 18 : 0;
+      const dy = key === 'arrowup' ? -18 : key === 'arrowdown' ? 18 : 0;
+      if (event.shiftKey) { state.viewer.pan(dx, dy); state.viewer.renderNow(); }
+      else {
+        state.viewer.orbit(dx, dy);
+        $$('[data-camera]').forEach(item => item.classList.toggle('active', item.dataset.camera === 'iso'));
+        $('#workspaceModeLabel').textContent = '3D medal';
+        $('#workspaceModeHelp').textContent = 'Drag empty space to rotate · click artwork to edit it';
+      }
+    }
+  });
   $('#fitModel').addEventListener('click', () => state.viewer?.fit());
   $('#toggleInspectLayers').addEventListener('click', () => {
     setInspectionOpen(!state.inspectionOpen, { focus: state.inspectionOpen === false });
@@ -6664,9 +7064,9 @@ function bindViewerControls() {
   $('#open2dSlice').addEventListener('click', openExactLayerSlice);
   $('#close2dSlice').addEventListener('click', () => { setView('3d'); setInspectionOpen(true, { focus: true, mark: false }); });
   $('#projectionToggle').addEventListener('click', event => {
-    const orthographic = event.currentTarget.textContent === 'Perspective';
-    event.currentTarget.textContent = orthographic ? 'Orthographic' : 'Perspective';
-    state.viewer?.setProjection(orthographic ? 'orthographic' : 'perspective');
+    const next = event.currentTarget.dataset.projection === 'orthographic' ? 'perspective' : 'orthographic';
+    updateProjectionToggle(next);
+    state.viewer?.setProjection(next);
   });
   $('#layerSlider').addEventListener('input', updateLayerPreview);
   $('#explodeSlider').addEventListener('input', event => { const value = Number(event.target.value); $('#explodeLabel').textContent = `${value.toFixed(1)} mm`; state.viewer?.setExplode(value); });
@@ -6718,6 +7118,10 @@ function bindStaticEvents() {
     const wasOpen = sidePanel?.classList.contains('mobile-open') === true;
     const compactWorkspace = window.matchMedia?.('(max-width: 900px)')?.matches ?? window.innerWidth <= 900;
     cancelPlacement();
+    state.hoveredId = null;
+    $('#surfaceProbe').hidden = true;
+    clearElementProxy('hover');
+    state.viewer?.clearHoverSurface();
     state.panel = button.dataset.panel;
     if (state.panel === 'create' && state.createTool === 'draw') enterSketchMode();
     else {
@@ -6770,23 +7174,51 @@ function bindStaticEvents() {
     event.preventDefault();
     activateOnboardingAction(Number(button.dataset.onboardingAction));
   });
-  $('#helpButton')?.addEventListener('click', () => { resetOnboardingProgress(); setView('3d'); renderOnboarding(); });
-  $('#quantity').addEventListener('change',event=>{state.quantity=Number(event.target.value);renderChecks();renderPrice();});
-  $('#zoomIn').addEventListener('click',()=>{state.zoom=Math.min(1.35,state.zoom+.1);$('#zoomLabel').textContent=`${Math.round(state.zoom*100)}%`;drawMedal();});
-  $('#zoomOut').addEventListener('click',()=>{state.zoom=Math.max(.65,state.zoom-.1);$('#zoomLabel').textContent=`${Math.round(state.zoom*100)}%`;drawMedal();});
+  $('#helpButton')?.addEventListener('click', () => { restartOnboarding(); setView('3d'); renderOnboarding(); });
+  const quantityInput = $('#quantity');
+  const updateQuantity = (normalize = false) => {
+    const requested = Number(quantityInput.value);
+    if (Number.isFinite(requested)) state.quantity = Math.max(1, Math.min(10000, Math.round(requested)));
+    if (normalize || !Number.isFinite(requested) || requested < 1 || requested > 10000 || requested !== Math.round(requested)) quantityInput.value = String(state.quantity);
+    renderChecks(); renderPrice();
+  };
+  quantityInput.addEventListener('input', () => updateQuantity(false));
+  quantityInput.addEventListener('change', () => updateQuantity(true));
+  quantityInput.addEventListener('blur', () => updateQuantity(true));
+  const changeWorkspaceZoom = direction => {
+    if (state.view !== 'toolpath' && state.viewer) {
+      state.viewer.zoom(direction > 0 ? .9 : 1.1);
+      $('#zoomLabel').textContent = '3D';
+    } else {
+      state.zoom = Math.max(.65, Math.min(1.35, state.zoom + direction * .1));
+      $('#zoomLabel').textContent = `${Math.round(state.zoom * 100)}%`;
+      drawMedal();
+    }
+  };
+  $('#zoomIn').addEventListener('click', () => changeWorkspaceZoom(1));
+  $('#zoomOut').addEventListener('click', () => changeWorkspaceZoom(-1));
   $('#undoButton').addEventListener('click',undo);$('#redoButton').addEventListener('click',redo);
-  $('#saveButton').addEventListener('click',async()=>{
-    if (state.liveEdit) { toast('Press OK or Cancel before saving'); return; }
-    if (state.imageReprocessBusy) { toast('Wait for the printable image update to finish before saving'); return; }
-    clearTimeout(state.saveTimer);await persistProject();toast(state.qaMode ? 'QA fixture changes stay in this tab only' : 'Design saved on this device');
+  $('#saveButton').addEventListener('click', async () => {
+    if (state.imageReprocessBusy) { toast('Wait for the image update to finish before saving a copy'); return; }
+    if (state.qaMode) { toast('This quality-check example is temporary'); return; }
+    await saveProjectCopy();
   });
+  $('#myMedalsButton')?.addEventListener('click', showProjectLibrary);
+  $('#myMedalsRailButton')?.addEventListener('click', showProjectLibrary);
+  $('#saveState')?.addEventListener('click', () => $('#saveState').classList.contains('error') ? downloadEmergencyBackup() : showProjectLibrary());
+  $$('[data-empty-tool]').forEach(button => button.addEventListener('click', () => {
+    state.panel = 'create'; state.createTool = button.dataset.emptyTool; renderAll({ panel: true });
+    if (window.innerWidth <= 900) $('.side-panel')?.classList.add('mobile-open');
+  }));
   $('#exportButton').addEventListener('click',showExportDialog);$('#editStockButton').addEventListener('click',showInventoryDialog);$('#profileInfoButton').addEventListener('click',showProfileInfo);$('#reviewButton').addEventListener('click',showChecksDialog);$('#openChecksButton').addEventListener('click',showChecksDialog);$('#reviewOrder').addEventListener('click',showPriceDialog);
   $('#dialogClose').addEventListener('click',closeDialog);dialog.addEventListener('click',event=>{if(event.target===dialog)closeDialog();});
   dialog.addEventListener('cancel', event => { event.preventDefault(); closeDialog(); });
   $('#assetInput').addEventListener('change',event=>{if(event.target.files[0])handleAssetFile(event.target.files[0]);});$('#projectInput').addEventListener('change',event=>{if(event.target.files[0])handleProjectFile(event.target.files[0]);});
   $('#projectNameInput').addEventListener('focus',()=>{state.inspectorEditStart=snapshot();});$('#projectNameInput').addEventListener('input',event=>{state.project.name=event.target.value;state.project.template='custom';$('#undoButton').disabled=false;$('#redoButton').disabled=true;markSavePending();});$('#projectNameInput').addEventListener('change',()=>{state.project=normalizeProject(state.project);pushHistory(state.inspectorEditStart);state.inspectorEditStart=null;renderAll({panel:true});});
   window.addEventListener('resize',()=>{resizeCanvas();state.viewer?.resize();renderPushPullGizmo();renderTransformGizmo();});
-  window.addEventListener('beforeunload', () => state.cloudImageAbortController?.abort());
+  window.addEventListener('pagehide', () => { clearTimeout(state.saveTimer); if (state.saveDirty) void persistProject(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && state.saveDirty) { clearTimeout(state.saveTimer); void persistProject(); } });
+  window.addEventListener('beforeunload', event => { state.cloudImageAbortController?.abort(); if (state.saveDirty) { event.preventDefault(); event.returnValue = ''; } });
   document.addEventListener('keydown',event=>{
     const activeEditor = document.activeElement;
     const editing=['INPUT','TEXTAREA','SELECT'].includes(activeEditor?.tagName)||activeEditor?.isContentEditable;
@@ -6834,8 +7266,12 @@ async function initialize() {
     ? normalizeInventory(DEFAULT_INVENTORY)
     : Array.isArray(storedInventory)&&storedInventory.length>=2?normalizeInventory(storedInventory):normalizeInventory(DEFAULT_INVENTORY);
   const storedProject = state.qaMode ? null : await loadRecord('projects','active',null);
+  const storedLibrary = state.qaMode ? [] : await loadRecord('settings', 'project-library', []);
+  state.projectLibrary = Array.isArray(storedLibrary) ? storedLibrary.filter(item => item && typeof item === 'object') : [];
   if (!state.qaMode && storedProject && Number(storedProject.version || 1) < 7) await saveUserRecord('projects', `migration-backup-${Date.now()}`, storedProject);
   state.project = normalizeProject(state.qaMode ? fixtureProject() : storedProject || createTemplateProject('blank'));
+  state.project.id = String(state.project.id || uid('project')).slice(0, 120);
+  state.project.createdAt ||= new Date().toISOString();
   const catalog = mergeRequiredDefaultFilaments(state.inventory, state.project.paletteIds);
   state.inventory = catalog.inventory;
   if(!state.qaMode && (!storedInventory || catalog.added))await saveUserRecord('inventory','catalog',state.inventory);
@@ -6846,16 +7282,18 @@ async function initialize() {
     state.ribbonPreviewColor = '#2458d8';
     document.documentElement.dataset.qaFixture = qaTemplate;
     document.documentElement.dataset.qaMode = 'ephemeral';
-  } else if (!storedProject) resetOnboardingProgress();
+  } else if (!storedProject) restartOnboarding();
   state.selectedId=state.project.elements[0]?.id||null;
   state.drawing.color=Math.min(1,state.project.paletteIds.length-1);
   syncDrawingDefaults(true);
   bindStaticEvents();
   renderToolPanel();
   renderAll({panel:false});
+  if (!state.qaMode && storedProject) markLoadedDesignProgress();
   setView('3d');
   requestAnimationFrame(() => { resizeCanvas(); state.viewer?.resize(); });
   await persistProject();
+  state.lastSavedSnapshot = snapshot();
   if (!state.qaMode && !storedProject) {
     requestAnimationFrame(openNewDesignWizard);
   }

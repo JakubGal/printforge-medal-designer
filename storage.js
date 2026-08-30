@@ -26,9 +26,22 @@ async function transaction(store, mode, action) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(store, mode);
     const request = action(tx.objectStore(store));
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-    tx.onerror = () => reject(tx.error);
+    let result;
+    let settled = false;
+    const fail = error => {
+      if (settled) return;
+      settled = true;
+      reject(error || new Error('Local storage transaction failed'));
+    };
+    request.onsuccess = () => { result = request.result; };
+    request.onerror = () => fail(request.error);
+    tx.oncomplete = () => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    tx.onerror = () => fail(tx.error);
+    tx.onabort = () => fail(tx.error || new Error('Local storage transaction was aborted'));
   });
 }
 

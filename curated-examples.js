@@ -1,4 +1,5 @@
 import { createTemplateProject, normalizeProject } from './project-model.js';
+import { polishMedalDesign } from './medal-aesthetic.js';
 
 /**
  * Original, legally safe showcase medals built entirely from MedalForge's
@@ -282,7 +283,11 @@ function hexCellPoints(radius = 4.5) {
 }
 
 function rayPoints(length = 11, width = 2.2) {
-  return [[0, -width / 2], [length * .75, -width / 2], [length, 0], [length * .75, width / 2], [0, width / 2]];
+  const corners = [[0, -width / 2], [length * .75, -width / 2], [length, 0], [length * .75, width / 2], [0, width / 2]];
+  return corners.flatMap((point, index) => {
+    const next = corners[(index + 1) % corners.length];
+    return [0, 1 / 3, 2 / 3].map(amount => [point[0] + (next[0] - point[0]) * amount, point[1] + (next[1] - point[1]) * amount]);
+  });
 }
 
 function arcBandPoints(centerX, centerY, outerRadius, innerRadius, startDegrees, endDegrees, count = 36) {
@@ -500,7 +505,7 @@ export function createHeritageMarathon42Example() {
     textElement(key, 'Back participant name', 'PARTICIPANT NAME', 0, 1, 4.1, 2, { face: 'back', groupId: backPersonal.id }),
     textElement(key, 'Back event', 'HERITAGE MARATHON', 0, -22, 4.1, 1, { face: 'back', groupId: backPersonal.id }),
     textElement(key, 'Back finish time', 'TIME  ·  00:00:00', 0, 12, 4.1, 2, { face: 'back', groupId: backPersonal.id }),
-    textElement(key, 'Back city and date', 'PRAGUE · 16 MAY 2027', 0, 20, 3.3, 1, { face: 'back', groupId: backPersonal.id }),
+    textElement(key, 'Back city and date', 'PRAGUE · MAY 2027', 0, 20, 3.3, 1, { face: 'back', groupId: backPersonal.id }),
     ...[-1,1].map((side, index) => pathElement(key, `Back Deco separator ${index + 1}`, [[-12,0],[12,0]], 0, side * 9 - 1, index ? 3 : 1, { face: 'back', closed: false, strokeWidth: .9, groupId: backOrnament.id })),
     shapeElement(key, 'Back marathon diamond', 'diamond', 0, -12, 6, 3, { face: 'back', groupId: backOrnament.id }),
   ];
@@ -532,7 +537,7 @@ export function createSummitTrail21KExample() {
   project.profile = { nozzle: .4, layerHeight: .16, hardened: false, colorSystem: 'multicolor', meshQuality: 'ultra' };
   project.medal = {
     ...project.medal,
-    shape: 'hexagon', diameter: 76, width: 74, height: 78, baseThickness: 2.88, baseColor: 0,
+    shape: 'hexagon', diameter: 84, width: 80, height: 84, baseThickness: 2.88, baseColor: 0,
     minimumFloor: 1.4, defaultHeight: .6, reliefHeight: .6, rimStyle: 'laurel', rimWidth: 3.1,
     rimHeight: .64, rimColor: 3, edgeInset: .8, loopStyle: 'single', loopWidth: 38,
     loopHeight: 9, slotWidth: 31, slotHeight: 4,
@@ -554,7 +559,7 @@ export function createSummitTrail21KExample() {
     textElement(key, 'Runner bib number', '21', 8.6, -1, 3.1, 0, { zHeight: 1.28, groupId: frontAthlete.id }),
     textElement(key, 'Event title', 'SUMMIT TRAIL', 0, -19.5, 4.2, 1, { zHeight: .64, groupId: frontType.id }),
     textElement(key, 'Distance', '21K', -2, 19.8, 8.6, 3, { zHeight: .8, groupId: frontType.id }),
-    textElement(key, 'Race date', '12 · 06 · 27', -1, 26.2, 3, 1, { zHeight: .64, groupId: frontType.id }),
+    textElement(key, 'Race date', '12·06·27', -1, 27, 3, 1, { zHeight: .64, groupId: frontType.id }),
     pathElement(key, 'Back elevation profile', elevation, 0, 0, 2, { face: 'back', closed: false, strokeWidth: 1.6, groupId: backProfile.id }),
     pathElement(key, 'Back baseline', [[-25,0],[25,0]], 0, 11, 4, { face: 'back', closed: false, strokeWidth: .8, groupId: backProfile.id }),
     ...[-24,-12,0,12,24].map((x, index) => pathElement(key, `Back elevation tick ${index + 1}`, [[0,-1.6],[0,1.6]], x, 11, 4, { face: 'back', closed: false, strokeWidth: .7, groupId: backProfile.id })),
@@ -611,7 +616,7 @@ export function createPodiumClassicExample() {
     textElement(key, 'Back event title', 'PODIUM CLASSIC', 0, -16.8, 4.5, 1, { face: 'back', groupId: backPersonal.id }),
     textElement(key, 'Back event detail', 'OPEN SERIES · 2027', 0, -10.4, 3.3, 2, { face: 'back', groupId: backPersonal.id }),
     pathElement(key, 'Back separator', [[-20,0],[20,0]], 0, 11.5, 1, { face: 'back', closed: false, strokeWidth: .8, groupId: backPersonal.id }),
-    textElement(key, 'Back result', 'RESULT  ·  00:00:00', 0, 17.2, 3.1, 2, { face: 'back', groupId: backPersonal.id }),
+    textElement(key, 'Back result', 'RESULT · 00:00', 0, 17.2, 3.1, 2, { face: 'back', groupId: backPersonal.id }),
     textElement(key, 'Back keepsake', 'ONE MOMENT', 0, 23.5, 3.4, 3, { face: 'back', groupId: backPersonal.id }),
   ];
   return finalizeProject(key, project, info.paletteRoles);
@@ -702,13 +707,13 @@ export function createJuniorChampionExample() {
     textElement(key, 'Champion title', 'CHAMPION', 0, 16.5, 5.4, 2, { zHeight: .8, groupId: frontType.id }),
     textElement(key, 'Participant name', 'ALEX', 0, 22.5, 5.8, 1, { zHeight: .8, groupId: frontType.id }),
     textElement(key, 'Event year', '2027', 0, -15.4, 3.2, 4, { zHeight: .6, groupId: frontType.id }),
-    ...confetti.map(([x,y,rotation,color], index) => pathElement(key, `Confetti ${index + 1}`, [[-2,-1.8],[2,-1.8],[2,1.8],[-2,1.8]], x, y, color, { rotation, zHeight: .6, groupId: frontConfetti.id })),
+    ...confetti.map(([x,y,rotation,color], index) => shapeElement(key, `Confetti ${index + 1}`, 'diamond', x, y, 5.2, color, { rotation, zHeight: .6, groupId: frontConfetti.id })),
     pathElement(key, 'Back keepsake field', circlePoints(22, 64), 0, 1, 1, { face: 'back', groupId: back.id }),
     pathElement(key, 'Back inner field', circlePoints(19.5, 64), 0, 1, 0, { face: 'back', groupId: back.id }),
     shapeElement(key, 'Back star', 'star', 0, -12, 10, 4, { face: 'back', groupId: back.id }),
     textElement(key, 'Back participant name', 'ALEX', 0, 1, 7.2, 1, { face: 'back', groupId: back.id }),
     textElement(key, 'Back achievement', 'YOU DID IT!', 0, 10, 4.2, 2, { face: 'back', groupId: back.id }),
-    textElement(key, 'Back event date', 'SPORT DAY · 2027', 0, 18, 3.2, 4, { face: 'back', groupId: back.id }),
+    textElement(key, 'Back event date', 'SPORT DAY 2027', 0, 16.5, 3.2, 4, { face: 'back', groupId: back.id }),
   ];
   return finalizeProject(key, project, info.paletteRoles);
 }
@@ -726,7 +731,10 @@ export const CURATED_EXAMPLE_BUILDERS = Object.freeze({
 export function createCuratedExample(key) {
   const builder = CURATED_EXAMPLE_BUILDERS[key];
   if (!builder) throw new RangeError(`Unknown curated example: ${key}`);
-  return builder();
+  // Curated artwork uses the same deterministic physical polish as generated
+  // concepts. This keeps gallery examples honest when users change nozzles or
+  // export them directly instead of treating them as visual-only mockups.
+  return polishMedalDesign(builder()).project;
 }
 
 export function listCuratedExamples() {

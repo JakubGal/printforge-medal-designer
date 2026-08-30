@@ -21,7 +21,9 @@ test('curated gallery exposes seven original deterministic production fixtures',
     assert.ok(first.elements.length >= 20);
     assert.ok(first.groups.length >= 4);
     assert.ok(projectUsedSlots(first).length >= 3);
-    assert.equal(buildChecks(first, DEFAULT_INVENTORY).some(check => check.level === 'block'), false);
+    const checks = buildChecks(first, DEFAULT_INVENTORY);
+    assert.equal(checks.some(check => check.level === 'block'), false);
+    assert.equal(checks.some(check => /uses one-line detail/i.test(check.title)), false);
     assert.equal(first.curatedExample.originalArtwork, true);
     assert.equal(CURATED_EXAMPLE_INFO[key].acceptanceCriteria.length, 4);
     assert.equal(CURATED_EXAMPLE_INFO[key].bodyShape, first.medal.shape);
@@ -30,8 +32,8 @@ test('curated gallery exposes seven original deterministic production fixtures',
   }
 });
 
-test('new premium examples clear the deterministic 9/10 release gate', () => {
-  for (const key of ['alpine-current-25k', 'aurora-polar-10k', 'heritage-marathon-42']) {
+test('every curated example clears the deterministic 9/10 release gate', () => {
+  for (const key of CURATED_EXAMPLE_KEYS) {
     const assessment = scoreMedalAesthetics(createCuratedExample(key));
     assert.equal(assessment.passed, true, `${key} scores ${assessment.score}/10: ${assessment.failedCategories.join(', ')}`);
     assert.ok(assessment.score >= 9, `${key} scores at least 9/10`);

@@ -789,6 +789,18 @@ export class MedalViewer3D {
     for (let axis = 0; axis < 3; axis += 1) this.target[axis] += right[axis] * -dx * scale + up[axis] * dy * scale;
   }
 
+  orbit(dx, dy) {
+    this.azimuth -= Number(dx || 0) * .008;
+    this.elevation = Math.max(-Math.PI / 2 + .01, Math.min(Math.PI / 2 - .01, this.elevation + Number(dy || 0) * .008));
+    this.render();
+  }
+
+  zoom(factor) {
+    this.distance *= Math.max(.1, Number(factor) || 1);
+    this.distance = Math.max(this.size * .22, Math.min(this.size * 8, this.distance));
+    this.render();
+  }
+
   bindControls() {
     this.canvas.addEventListener('contextmenu', event => event.preventDefault());
     this.canvas.addEventListener('pointerdown', event => {
@@ -810,20 +822,15 @@ export class MedalViewer3D {
       const dx = event.clientX - previous.x, dy = event.clientY - previous.y;
       this.pointerState.set(event.pointerId, { x: event.clientX, y: event.clientY });
       if (this.dragMode === 'pan') this.pan(dx, dy);
-      else {
-        this.azimuth -= dx * .008;
-        this.elevation = Math.max(-Math.PI / 2 + .01, Math.min(Math.PI / 2 - .01, this.elevation + dy * .008));
-      }
-      this.render();
+      else this.orbit(dx, dy);
+      if (this.dragMode === 'pan') this.render();
     });
     const release = event => { this.pointerState.delete(event.pointerId); if (this.pointerState.size === 1) { const point = [...this.pointerState.values()][0]; this.lastPinch = null; this.pointerState = new Map([[...this.pointerState.keys()][0], point]); } };
     this.canvas.addEventListener('pointerup', release);
     this.canvas.addEventListener('pointercancel', release);
     this.canvas.addEventListener('wheel', event => {
       event.preventDefault();
-      this.distance *= Math.exp(event.deltaY * .0012);
-      this.distance = Math.max(this.size * .22, Math.min(this.size * 8, this.distance));
-      this.render();
+      this.zoom(Math.exp(event.deltaY * .0012));
     }, { passive: false });
     this.canvas.addEventListener('dblclick', () => this.fit());
   }

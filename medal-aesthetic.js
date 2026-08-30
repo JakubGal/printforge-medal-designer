@@ -261,6 +261,8 @@ function manufacturabilityScore(project, inventory) {
   const checks = buildChecks(project, inventory);
   const blocks = checks.filter(check => check.level === 'block');
   const warnings = checks.filter(check => check.level === 'warn' && check.title !== 'Back artwork uses first-layer color');
+  const oneLineWarnings = warnings.filter(check => /uses one-line detail/i.test(check.title));
+  const otherWarnings = warnings.filter(check => !oneLineWarnings.includes(check));
   const layer = project.profile.layerHeight;
   const nozzle = project.profile.nozzle;
   const visible = visibleElements(project);
@@ -271,16 +273,18 @@ function manufacturabilityScore(project, inventory) {
   const thinPaths = visible.filter(element => element.type === 'path' && !element.closed && element.strokeWidth * Math.min(element.scaleX || 1, element.scaleY || 1) < nozzle * 1.125 - EPSILON);
   const back = visible.filter(element => element.face === 'back');
   const unsafeBack = back.filter(element => element.operation !== 'inlay' || Math.abs(element.zDepth - layer) > .001 || element.inlayHeight > EPSILON);
-  let score = 10 - blocks.length * 4 - Math.min(1.2, warnings.length * .18) - Math.min(1.4, offLayer.length * .25) - Math.min(1.6, thinPaths.length * .4) - Math.min(2, unsafeBack.length * .7);
+  let score = 10 - blocks.length * 4 - Math.min(3.5, oneLineWarnings.length * .4) - Math.min(1.2, otherWarnings.length * .18) - Math.min(1.4, offLayer.length * .25) - Math.min(1.6, thinPaths.length * .4) - Math.min(2, unsafeBack.length * .7);
   const issues = [], strengths = [];
   if (blocks.length) issues.push(`${blocks.length} production blocker${blocks.length === 1 ? '' : 's'} must be fixed.`);
   else strengths.push('No blocking production check was found.');
   if (offLayer.length) issues.push(`${offLayer.length} relief amount${offLayer.length === 1 ? ' is' : 's are'} not aligned to physical layers.`);
   else strengths.push('All relief depths align to the selected layer height.');
+  if (oneLineWarnings.length) issues.push(`${oneLineWarnings.length} detail${oneLineWarnings.length === 1 ? ' uses' : 's use'} only one extrusion line instead of the robust two-line target.`);
+  else strengths.push('Visible details meet the robust two-line target for this nozzle.');
   if (thinPaths.length) issues.push(`${thinPaths.length} line${thinPaths.length === 1 ? ' is' : 's are'} below one printable extrusion bead.`);
   if (unsafeBack.length) issues.push('Back-face objects are not all flush first-layer inlays.');
   else if (back.length) strengths.push('The reverse remains a flat, first-layer multicolor design.');
-  return category(score, strengths, issues, { blockers: blocks.length, warnings: warnings.length, offLayerHeights: offLayer.length, subNozzleLines: thinPaths.length, unsafeBackObjects: unsafeBack.length });
+  return category(score, strengths, issues, { blockers: blocks.length, warnings: warnings.length, oneLineWarnings: oneLineWarnings.length, offLayerHeights: offLayer.length, subNozzleLines: thinPaths.length, unsafeBackObjects: unsafeBack.length });
 }
 
 function detailContinuityScore(project) {
@@ -398,18 +402,20 @@ function normalizeRelief(project) {
 }
 
 function reinforceMinimumFeatures(project) {
-  const oneBead = project.profile.nozzle * 1.125;
-  const minimumText = Math.max(2.8, project.profile.nozzle * 4.8);
+  // Leave a tiny numerical margin so normalization and decimal round-trips do
+  // not turn an exact two-line target back into a one-line warning.
+  const robust = project.profile.nozzle * 2.25 * 1.02;
+  const minimumText = Math.max(2.8, robust / .16);
   let changed = false;
   for (const element of project.elements) {
     if (element.hidden) continue;
-    if (element.type === 'path' && !element.closed && element.strokeWidth * Math.min(element.scaleX || 1, element.scaleY || 1) < oneBead) {
-      element.strokeWidth = oneBead / Math.min(element.scaleX || 1, element.scaleY || 1);
+    if (element.type === 'path' && !element.closed && element.strokeWidth * Math.min(element.scaleX || 1, element.scaleY || 1) < robust) {
+      element.strokeWidth = robust / Math.min(element.scaleX || 1, element.scaleY || 1);
       changed = true;
     } else if (element.type === 'shape') {
       const scale = Math.min(element.scaleX || 1, element.scaleY || 1);
       const featureRatio = element.shape === 'star' || element.shape === 'bolt' ? .12 : .22;
-      const requiredSize = oneBead / featureRatio / scale;
+      const requiredSize = robust / featureRatio / scale;
       if (element.size < requiredSize) {
         element.size = requiredSize;
         changed = true;
@@ -417,14 +423,18 @@ function reinforceMinimumFeatures(project) {
     } else if (element.type === 'path' && element.closed) {
       const bounds = elementBounds(element);
       const feature = Math.min(bounds.width, bounds.height) * .15;
-      if (feature < oneBead) {
-        element.scale *= oneBead / Math.max(.001, feature);
+      if (feature < robust) {
+        element.scale *= robust / Math.max(.001, feature);
         changed = true;
       }
-    } else if (element.type === 'text' && element.fontSize * Math.min(element.scaleX || 1, element.scaleY || 1) < minimumText) {
-      element.fontSize = minimumText / Math.min(element.scaleX || 1, element.scaleY || 1);
-      element.weight = Math.max(700, Number(element.weight) || 400);
-      changed = true;
+    } else if (element.type === 'text') {
+      const scale = Math.min(element.scaleX || 1, element.scaleY || 1);
+      const featureRatio = (Number(element.weight) || 400) >= 800 ? .16 : .11;
+      if (element.fontSize * scale * featureRatio < robust) {
+        element.weight = Math.max(800, Number(element.weight) || 400);
+        element.fontSize = minimumText / scale;
+        changed = true;
+      }
     }
   }
   return changed;
@@ -468,12 +478,16 @@ function centerFaceComposition(project, face) {
 function polishingPass(input, iteration) {
   const project = structuredClone(input);
   const changes = [];
-  if (reinforceMinimumFeatures(project)) changes.push('reinforced sub-nozzle details');
+  if (reinforceMinimumFeatures(project)) changes.push('reinforced fragile one-line details');
   if (normalizeRelief(project)) changes.push('organized relief into semantic height tiers');
   if (separateTextRows(project)) changes.push('separated colliding text rows');
   if (centerFaceComposition(project, 'front')) changes.push('balanced the front composition');
   if (centerFaceComposition(project, 'back')) changes.push('balanced the back composition');
-  const inset = Math.max(.5, (Number(project.medal.rimWidth) || 0) + project.profile.nozzle * 1.25);
+  const inset = Math.max(
+    .5,
+    (Number(project.medal.edgeInset) || 0) + (Number(project.medal.rimWidth) || 0),
+    (Number(project.medal.rimWidth) || 0) + project.profile.nozzle * 1.25,
+  );
   let fitted = 0;
   for (const element of project.elements) if (!element.hidden && fitElementToSafeArea(project, element, inset)) fitted += 1;
   if (fitted) changes.push(`fitted ${fitted} object${fitted === 1 ? '' : 's'} into the safe area`);
@@ -495,7 +509,9 @@ export function polishMedalDesign(input, options = {}) {
   let project = normalizeProject(input);
   let assessment = scoreMedalAesthetics(project, { threshold, inventory });
   const history = [{ iteration: 0, score: assessment.score, changes: [] }];
-  for (let iteration = 1; iteration <= maxIterations && !assessment.passed; iteration += 1) {
+  // Always perform one deterministic cleanup pass. A high weighted score must
+  // not let dozens of merely one-line details bypass the physical polish step.
+  for (let iteration = 1; iteration <= maxIterations && (iteration === 1 || !assessment.passed); iteration += 1) {
     const pass = polishingPass(project, iteration);
     const nextAssessment = scoreMedalAesthetics(pass.project, { threshold, inventory });
     history.push({ iteration, score: nextAssessment.score, changes: pass.changes });

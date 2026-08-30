@@ -42,7 +42,10 @@ async function assertModuleGraph(moduleFile) {
     const target = resolve(dirname(normalized), reference.split(/[?#]/u)[0]);
     assertInsideOutput(target, `${reference} from ${normalized} must not escape public/`);
     assert.equal(await exists(target), true, `${reference} from ${normalized} must exist`);
-    if (target.endsWith('.js')) await assertModuleGraph(target);
+    if (target.endsWith('.js')) {
+      assert.match(reference, /\?v=20260831-release20$/u, `${reference} from ${normalized} must carry the current release cache key`);
+      await assertModuleGraph(target);
+    }
   }
 }
 
@@ -50,10 +53,12 @@ const hub = join(output, 'index.html');
 const medal = join(output, 'workspaces', 'medals', 'index.html');
 const notFound = join(output, '404.html');
 const wasm = join(output, 'assets', 'medals', 'cad-kernel', 'replicad_single.wasm');
+const shapeLibrary = join(output, 'assets', 'medals', 'shape-library.js');
 
 assert.equal(await exists(hub), true, 'workspace hub must be emitted');
 assert.equal(await exists(medal), true, 'medal workspace must be emitted');
 assert.equal(await exists(notFound), true, 'a physical 404 page must disable Cloudflare SPA fallback');
+assert.equal(await exists(shapeLibrary), true, 'the canonical symbol library must be emitted');
 assert.match(await readFile(hub, 'utf8'), /PrintForge/u);
 assert.match(await readFile(medal, 'utf8'), /MedalForge/u);
 assert.match(await readFile(notFound, 'utf8'), /PrintForge · 404/u);

@@ -1,5 +1,6 @@
 import { buildColumnField, columnFieldToMeshes, meshCellForProject, validateMesh } from './geometry-engine.js';
 import { enforceFlatBackArtwork, medalAttachmentGeometry, medalContainsPoint, normalizeFilament, offsetPolygon, presetMedalOutlinePoints, projectBackOffset, rimContainsPoint } from './project-model.js';
+import { shapeSvgMarkup, traceShapePath } from './shape-library.js';
 
 const encoder = new TextEncoder();
 export const EXPORT_LIMITS = Object.freeze({
@@ -79,36 +80,7 @@ function assertMeshPaletteSlots(meshes, palette) {
 }
 
 function shapePath(ctx, element) {
-  const size = element.size || 12;
-  ctx.beginPath();
-  if (element.shape === 'circle') {
-    ctx.arc(0, 0, size / 2, 0, Math.PI * 2);
-  } else if (element.shape === 'square') {
-    ctx.roundRect(-size / 2, -size / 2, size, size, Math.max(.6, size * .08));
-  } else if (element.shape === 'diamond') {
-    ctx.moveTo(0, -size / 2); ctx.lineTo(size / 2, 0); ctx.lineTo(0, size / 2); ctx.lineTo(-size / 2, 0); ctx.closePath();
-  } else if (element.shape === 'bolt') {
-    const p = [[-.1,-.55],[.5,-.55],[.15,-.08],[.48,-.08],[-.35,.58],[-.08,.08],[-.45,.08]];
-    p.forEach(([x, y], index) => index ? ctx.lineTo(x * size, y * size) : ctx.moveTo(x * size, y * size));
-    ctx.closePath();
-  } else if (element.shape === 'heart') {
-    ctx.moveTo(0, size * .45);
-    ctx.bezierCurveTo(-size * .65, 0, -size * .48, -size * .48, -size * .2, -size * .48);
-    ctx.bezierCurveTo(0, -size * .48, 0, -size * .25, 0, -size * .14);
-    ctx.bezierCurveTo(0, -size * .25, 0, -size * .48, size * .2, -size * .48);
-    ctx.bezierCurveTo(size * .48, -size * .48, size * .65, 0, 0, size * .45);
-    ctx.closePath();
-  } else {
-    const points = element.shape === 'star' ? 10 : 6;
-    for (let i = 0; i < points; i += 1) {
-      const radius = element.shape === 'star' && i % 2 ? size * .22 : size * .5;
-      const angle = -Math.PI / 2 + i * Math.PI * 2 / points;
-      const x = Math.cos(angle) * radius;
-      const y = Math.sin(angle) * radius;
-      if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
-    }
-    ctx.closePath();
-  }
+  traceShapePath(ctx, element.shape, element.size || 12);
 }
 
 function loadImage(source) {
@@ -416,7 +388,7 @@ export async function buildMeshes(project, onProgress = () => {}, options = {}) 
   const cellLimit = Math.max(100_000, Number(options.maxCells) || EXPORT_LIMITS.cells);
   if (estimatedCellCount > cellLimit) throw new Error(`This profile needs ${estimatedCellCount.toLocaleString()} sampled cells, above the ${cellLimit.toLocaleString()}-cell browser limit. Choose a lower mesh detail or reduce the medal size.`);
   if (options.production && project.paletteMissingIds?.length) throw new Error(`The filament catalog is missing ${project.paletteMissingIds.join(', ')}. Restore the project inventory snapshot or remap those palette slots before export.`);
-  onProgress('Rasterizing the medal body…');
+  onProgress('Preparing the medal body…');
   const baseMask = makeBaseMask(project, bounds, cell);
   onProgress('Converting every object into a Z operation…');
   const operations = await renderOperations(project, bounds, cell, baseMask);
@@ -787,12 +759,7 @@ export async function meshesTo3mf(project, meshes) {
 }
 
 function svgShape(element) {
-  const size = element.size || 12;
-  if (element.shape === 'circle') return `<circle cx="0" cy="0" r="${size/2}"/>`;
-  if (element.shape === 'square') return `<rect x="${-size/2}" y="${-size/2}" width="${size}" height="${size}" rx="${Math.max(.6,size*.08)}"/>`;
-  if (element.shape === 'heart') return `<path d="M 0 ${size*.45} C ${-size*.65} 0 ${-size*.48} ${-size*.48} ${-size*.2} ${-size*.48} C 0 ${-size*.48} 0 ${-size*.25} 0 ${-size*.14} C 0 ${-size*.25} 0 ${-size*.48} ${size*.2} ${-size*.48} C ${size*.48} ${-size*.48} ${size*.65} 0 0 ${size*.45} Z"/>`;
-  const points = element.shape === 'diamond' ? [[0,-.5],[.5,0],[0,.5],[-.5,0]] : element.shape === 'bolt' ? [[-.1,-.55],[.5,-.55],[.15,-.08],[.48,-.08],[-.35,.58],[-.08,.08],[-.45,.08]] : Array.from({ length: element.shape === 'star' ? 10 : 6 }, (_, i) => { const radius = element.shape === 'star' && i % 2 ? .22 : .5; const angle = -Math.PI/2 + i * Math.PI * 2 / (element.shape === 'star' ? 10 : 6); return [Math.cos(angle)*radius,Math.sin(angle)*radius]; });
-  return `<polygon points="${points.map(([x,y]) => `${(x*size).toFixed(3)},${(y*size).toFixed(3)}`).join(' ')}"/>`;
+  return shapeSvgMarkup(element.shape, element.size || 12);
 }
 
 function svgMedalOutline(project, inset = 0, attributes = '') {

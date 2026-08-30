@@ -15,7 +15,7 @@
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:image" content="../../og.png" />
     <title>MedalForge — Printable medal designer</title>
-    <link rel="stylesheet" href="../../assets/medals/styles.css?v=20260830-release8" />
+    <link rel="stylesheet" href="../../assets/medals/styles.css?v=20260831-release20" />
   </head>
   <body>
     <div class="app-shell">
@@ -30,8 +30,9 @@
         </label>
         <div class="top-actions">
           <span class="mode-pill" title="Design and production files stay on this device; online image generation is used only when selected"><i></i> Local-first</span>
-          <span class="save-state" id="saveState">Saved locally</span>
-          <button class="button secondary compact-button" id="newDesignButton" type="button" title="Start or reset to a clean medal">New medal</button>
+          <button class="save-state" id="saveState" type="button" title="Open your saved medals">Saved on this device</button>
+          <button class="button secondary compact-button" id="myMedalsButton" type="button">My medals</button>
+          <button class="button secondary compact-button" id="newDesignButton" type="button" title="Open the guided new-medal setup">New medal</button>
           <button class="button secondary compact-button" id="examplesButton" type="button" aria-haspopup="dialog" aria-controls="templateGallery" aria-expanded="false">Examples</button>
           <button class="button secondary settings-button" id="globalSettingsButton" type="button" aria-haspopup="dialog" aria-controls="globalSettingsDrawer" aria-expanded="false">
             <span aria-hidden="true">⚙</span><span id="settingsSummary">0.4 mm · 3 colors</span>
@@ -39,8 +40,8 @@
           <button class="button secondary compact-button" id="helpButton" type="button" aria-label="Open quick tour" title="Open quick tour">
             <span class="help-label-full">Quick tour</span><span class="help-label-short" aria-hidden="true">?</span>
           </button>
-          <button class="button secondary" id="saveButton">Save</button>
-          <button class="button primary" id="exportButton">Export files</button>
+          <button class="button secondary" id="saveButton"><span class="save-label-full">Save a copy</span><span class="save-label-short" aria-hidden="true">Save</span></button>
+          <button class="button primary" id="exportButton"><span class="export-label-full">Check &amp; export</span><span class="export-label-short" aria-hidden="true">Export</span></button>
         </div>
       </header>
 
@@ -48,10 +49,11 @@
         <nav class="tool-rail" aria-label="Design tools">
           <button class="tool active" data-panel="create"><span>＋</span>Add</button>
           <button class="tool" data-panel="medal"><span>◉</span>Medal</button>
-          <button class="tool" data-panel="layers"><span>≡</span>Objects</button>
-          <button class="tool" id="newDesignRailButton" type="button"><span>↺</span>New</button>
-          <button class="tool" id="examplesRailButton" type="button" aria-haspopup="dialog" aria-controls="templateGallery" aria-expanded="false"><span>▦</span>Examples</button>
-          <button class="tool" id="globalSettingsRailButton" type="button" aria-haspopup="dialog" aria-controls="globalSettingsDrawer" aria-expanded="false"><span>⚙</span>Settings</button>
+          <button class="tool" data-panel="layers"><span>≡</span>Items</button>
+          <button class="tool mobile-only-tool" id="myMedalsRailButton" type="button"><span>▣</span>My medals</button>
+          <button class="tool mobile-only-tool" id="newDesignRailButton" type="button"><span>↺</span>New</button>
+          <button class="tool mobile-only-tool" id="examplesRailButton" type="button" aria-haspopup="dialog" aria-controls="templateGallery" aria-expanded="false"><span>▦</span>Examples</button>
+          <button class="tool mobile-only-tool" id="globalSettingsRailButton" type="button" aria-haspopup="dialog" aria-controls="globalSettingsDrawer" aria-expanded="false"><span>⚙</span>More</button>
         </nav>
 
         <aside class="side-panel context-panel" aria-label="Contextual tool options">
@@ -62,18 +64,18 @@
           <div class="stage-toolbar">
             <div class="workspace-mode" aria-live="polite">
               <span class="workspace-mode-dot"></span>
-              <span><strong id="workspaceModeLabel">Model workspace</strong><small id="workspaceModeHelp">Drag artwork to move · drag its Z arrow for height</small></span>
+              <span><strong id="workspaceModeLabel">3D medal</strong><small id="workspaceModeHelp">Click artwork to edit · drag the blue height handle to raise or recess</small></span>
             </div>
             <div class="stage-actions">
               <button id="undoButton" title="Undo" aria-label="Undo">↶</button><button id="redoButton" title="Redo" aria-label="Redo">↷</button>
               <span></span>
-              <button id="zoomOut" aria-label="Zoom out">−</button><strong id="zoomLabel">100%</strong><button id="zoomIn" aria-label="Zoom in">＋</button>
+              <button id="zoomOut" aria-label="Zoom out">−</button><strong id="zoomLabel">3D</strong><button id="zoomIn" aria-label="Zoom in">＋</button>
             </div>
           </div>
           <div class="canvas-wrap" id="canvasWrap">
             <div class="canvas-grid"></div>
             <canvas id="medalCanvas" width="1000" height="760" hidden aria-label="Top sketch plane. Draw or drag selected objects, then finish the sketch to return to the 3D model."></canvas>
-            <canvas id="modelCanvas" width="1000" height="760" aria-label="Rotatable and selectable 3D model. Drag empty space to orbit, click artwork to select it, Shift-drag to pan, and scroll to zoom."></canvas>
+            <canvas id="modelCanvas" width="1000" height="760" tabindex="0" aria-label="Rotatable and selectable 3D model. Drag empty space to orbit, click artwork to select it, Shift-drag to pan, and scroll to zoom. Keyboard: arrow keys rotate, Shift plus arrows pan, plus and minus zoom, 1 shows the front, 2 the back, and 0 returns to 3D."></canvas>
             <output class="surface-probe" id="surfaceProbe" hidden aria-live="polite"></output>
             <div class="sketch-mode-bar" id="sketchModeBar" hidden>
               <span><i></i><strong>Sketching on medal face</strong><small>Draw and position in the top plane</small></span>
@@ -84,16 +86,26 @@
               <span class="placement-ghost-copy"><strong id="placementGhostLabel">Place object</strong><small id="placementGhostSize">0 × 0 mm</small><em id="placementGhostFace">Front face</em></span>
             </div>
             <div class="push-pull-gizmo" id="pushPullGizmo" hidden aria-label="Selected object push pull control">
-              <button class="push-pull-axis" id="pushPullHandle" type="button" aria-label="Drag to raise, engrave, or cut"><span class="push-pull-line"></span><span class="push-pull-head">▲</span></button>
+              <button class="push-pull-axis" id="pushPullHandle" type="button" aria-label="Drag to change height or depth"><span class="push-pull-line"></span><span class="push-pull-head">▲</span></button>
               <output class="gizmo-label" id="pushPullLabel">Raised 0.60 mm</output>
               <div class="gizmo-actions" id="gizmoActions">
-                <button id="gizmoPocketFill" type="button">Fill pocket</button>
-                <button id="gizmoCutThrough" type="button">Cut through</button>
+                <button id="gizmoPocketFill" type="button">Make flat color</button>
+                <button id="gizmoCutThrough" type="button">Make a hole</button>
               </div>
             </div>
             <svg class="transform-gizmo" id="transformGizmo" hidden aria-label="Selected object resize and rotate controls">
               <polygon id="transformOutline" points="" />
               <line id="transformRotateStem" />
+              <circle class="transform-hit" id="transformRotateHit" r="22" data-transform-handle="rotate" aria-hidden="true" />
+              <circle class="transform-hit" id="transformMoveHit" r="22" data-transform-handle="move" aria-hidden="true" />
+              <rect class="transform-hit" id="transformLeftHit" width="44" height="44" data-transform-handle="resize-x" data-transform-direction="-1,0" aria-hidden="true" />
+              <rect class="transform-hit" id="transformWidthHit" width="44" height="44" data-transform-handle="resize-x" data-transform-direction="1,0" aria-hidden="true" />
+              <rect class="transform-hit" id="transformTopHit" width="44" height="44" data-transform-handle="resize-y" data-transform-direction="0,-1" aria-hidden="true" />
+              <rect class="transform-hit" id="transformHeightHit" width="44" height="44" data-transform-handle="resize-y" data-transform-direction="0,1" aria-hidden="true" />
+              <rect class="transform-hit" id="transformTopLeftHit" width="44" height="44" data-transform-handle="resize-xy" data-transform-direction="-1,-1" aria-hidden="true" />
+              <rect class="transform-hit" id="transformTopRightHit" width="44" height="44" data-transform-handle="resize-xy" data-transform-direction="1,-1" aria-hidden="true" />
+              <rect class="transform-hit" id="transformBottomLeftHit" width="44" height="44" data-transform-handle="resize-xy" data-transform-direction="-1,1" aria-hidden="true" />
+              <rect class="transform-hit" id="transformCornerHit" width="44" height="44" data-transform-handle="resize-xy" data-transform-direction="1,1" aria-hidden="true" />
               <circle class="transform-handle rotate" id="transformRotateHandle" r="7" data-transform-handle="rotate" role="button" tabindex="0" aria-label="Rotate selected object. Use arrow keys for precise rotation." />
               <circle class="transform-handle move" id="transformMoveHandle" r="10" data-transform-handle="move" role="button" tabindex="0" aria-label="Move selected object. Use arrow keys for precise movement." />
               <rect class="transform-handle" id="transformLeftHandle" width="13" height="13" rx="3" data-transform-handle="resize-x" data-transform-direction="-1,0" role="button" tabindex="0" aria-label="Resize selected object from the left. Use arrow keys for precise sizing." />
@@ -109,23 +121,23 @@
             <div class="selection-hud" id="selectionHud" hidden></div>
             <div class="live-edit-bar" id="liveEditBar" hidden role="status" aria-live="polite">
               <span><small>Live edit</small><strong id="liveEditLabel">Previewing change</strong></span>
-              <button type="button" id="cancelLiveEdit">Cancel</button>
-              <button type="button" class="confirm" id="acceptLiveEdit">OK</button>
+              <button type="button" id="cancelLiveEdit">Restore</button>
+              <button type="button" class="confirm" id="acceptLiveEdit">Apply height</button>
             </div>
             <section class="quick-start" id="quickStart" hidden aria-label="Getting started">
               <button class="quick-start-close" id="dismissQuickStart" aria-label="Dismiss getting started">×</button>
-              <span class="eyebrow">Your first printable medal</span>
-              <strong>Four quick steps</strong>
+              <span class="eyebrow">Simple design guide</span>
+              <strong>Finish your medal step by step</strong>
               <ol id="quickStartSteps"></ol>
             </section>
-            <div class="canvas-empty" id="canvasEmpty" hidden><strong>Add your first element</strong><span>Use Text, Upload, Shapes, or Draw.</span></div>
-            <div class="model-loading" id="modelLoading" hidden><span class="spinner"></span><strong>Building printable mesh…</strong><small id="modelLoadingText">Rasterizing the medal body</small></div>
+            <div class="canvas-empty" id="canvasEmpty" hidden><strong>What would you like to add?</strong><span>Every item stays editable.</span><div class="canvas-empty-actions"><button type="button" data-empty-tool="text">Text</button><button type="button" data-empty-tool="upload">Image</button><button type="button" data-empty-tool="shapes">Symbol</button><button type="button" data-empty-tool="draw">Draw</button></div></div>
+            <div class="model-loading" id="modelLoading" hidden><span class="spinner"></span><strong>Building the 3D medal…</strong><small id="modelLoadingText">Preparing the medal body</small></div>
             <div class="viewer-toolbar" id="viewerToolbar" hidden aria-label="3D camera controls">
-              <div class="viewer-preset-group"><button class="active" data-camera="iso">Iso</button><button data-camera="top">Top</button><button data-camera="bottom">Bottom</button><button data-camera="front">Front</button><button data-camera="right">Right</button></div>
-              <button id="fitModel" title="Fit model to view">Fit</button>
-              <button id="toggleInspectLayers" title="Inspect exact print layers" aria-expanded="false">Layers</button>
-              <button id="projectionToggle" title="Toggle perspective">Perspective</button>
-              <button id="savePreview" title="Download a PNG of this view">PNG</button>
+              <div class="viewer-preset-group"><button class="active" data-camera="iso">3D</button><button data-camera="top">Front side</button><button data-camera="bottom">Back side</button><button data-camera="front">Edge</button><button data-camera="right">Side</button></div>
+              <button id="fitModel" title="Fit the whole medal in view">Fit view</button>
+              <button id="toggleInspectLayers" title="Preview the physical print layers" aria-expanded="false">Print layers</button>
+              <button id="projectionToggle" data-projection="perspective" title="Switch to orthographic view">View: Perspective</button>
+              <button id="savePreview" title="Download a picture of this view">Snapshot</button>
             </div>
             <aside class="slicer-dock" id="slicerDock" hidden aria-label="3D inspection controls">
               <div class="slicer-dock-head"><span><small>Print preview</small><strong id="modelPartCount">Building…</strong></span><span class="local-badge">Local</span></div>
@@ -135,37 +147,37 @@
               <label class="viewer-check ribbon-preview-toggle"><input id="viewerRibbon" type="checkbox" /><span>Show attached ribbon <small>Preview only · never exported</small></span><input id="viewerRibbonColor" type="color" value="#2458d8" aria-label="Ribbon preview color" /></label>
               <button class="full-button slice-view-button" id="open2dSlice" type="button">Open exact 2D slice</button>
               <div class="slicer-divider"></div>
-              <div class="viewer-parts-title"><span>Color parts</span><button id="showAllParts">Show all</button></div>
+              <div class="viewer-parts-title"><span>Filament pieces</span><button id="showAllParts">Show all</button></div>
               <div class="viewer-parts" id="viewerParts"></div>
               <div class="model-stats" id="modelStats"></div>
-              <p class="viewer-help">Drag empty space to rotate · click artwork for its push/pull arrow · scrub filled layer cross-sections · Shift/right drag to pan · wheel/pinch to zoom</p>
+              <p class="viewer-help">Drag empty space to rotate · click artwork for its height handle · scrub filled layer cross-sections · Shift/right drag to pan · wheel/pinch to zoom</p>
             </aside>
             <aside class="layer-dock" id="layerDock" hidden aria-label="Layer preview controls">
-              <div class="slicer-dock-head"><span><small>2D slice</small><strong id="sliceLayerTitle">Top surface</strong></span><span class="slice-dock-actions"><span class="local-badge" id="sliceExactBadge">Exact Z</span><button type="button" id="close2dSlice" class="local-badge">Back to 3D</button></span></div>
+              <div class="slicer-dock-head"><span><small>2D print layer</small><strong id="sliceLayerTitle">Top surface</strong></span><span class="slice-dock-actions"><span class="local-badge" id="sliceExactBadge">Physical layer</span><button type="button" id="close2dSlice" class="local-badge">Back to 3D</button></span></div>
               <label class="viewer-range"><span><b>Layer</b><output id="sliceLayerLabel">12 / 15</output></span><input id="sliceLayerSlider" type="range" min="1" max="15" value="12" /></label>
               <div class="slice-legend"><span><i class="slice-base"></i>Solid at this layer</span><span><i class="slice-hole"></i>Air / cut</span></div>
-              <small class="slice-status" id="sliceStatus">Compiled from the printable heightfield.</small>
-              <p class="viewer-help">Move through the build one physical layer at a time. Engravings become air; inlays show their assigned filament.</p>
+              <small class="slice-status" id="sliceStatus">Built from the current printable model.</small>
+              <p class="viewer-help">Move through the print one physical layer at a time. Recessed areas become empty space; flat colors show their chosen filament.</p>
             </aside>
             <div class="size-chip"><span>↔</span><strong id="diameterLabel">60 mm</strong></div>
             <div class="compute-chip"><span></span><strong>Computed on this device</strong></div>
           </div>
           <div class="stage-footer">
             <span id="stageHint">Select and drag an element to position it</span>
-            <span><kbd>Del</kbd> delete · <kbd>[ ]</kbd> Z by layer · <kbd>Ctrl Z</kbd> undo · arrows move</span>
+            <span><kbd>Del</kbd> delete · <kbd>[ ]</kbd> height by layer · <kbd>Ctrl Z</kbd> undo · arrows move</span>
           </div>
         </section>
 
         <aside class="inspector inspector-drawer" aria-label="Objects, selected element, and manufacturing checks">
           <section class="object-browser">
-            <div class="object-browser-head"><div><span class="eyebrow">CAD tree</span><h2>Objects</h2></div><button class="icon-button" id="addObjectGroup" type="button" title="Create a group" aria-label="Create a group">＋</button></div>
+            <div class="object-browser-head"><div><span class="eyebrow">Front &amp; back</span><h2>Design items</h2></div><button class="icon-button" id="addObjectGroup" type="button" title="Group related design items" aria-label="Create a design group">＋</button></div>
             <div id="objectTree"></div>
           </section>
           <div class="divider"></div>
           <div id="selectionInspector"></div>
           <div class="divider"></div>
           <details class="manufacturing-summary">
-            <summary><span><small>Manufacturing check</small><strong id="checkTitle">Ready to print</strong></span><span class="status-orb pass" id="checkOrb"></span></summary>
+            <summary><span><small>Design checks</small><strong id="checkTitle">Editor checks passed</strong></span><span class="status-orb pass" id="checkOrb"></span></summary>
             <p class="check-summary" id="checkSummary">All current features meet the selected profile.</p>
             <div id="issues" class="issue-list"></div>
             <button class="full-button" id="reviewButton">Review all checks</button>
@@ -177,27 +189,30 @@
         <div class="global-settings-backdrop" data-close-settings></div>
         <div class="global-settings-sheet">
           <div class="global-settings-head"><div><span class="eyebrow">Defaults for this project</span><h2>Printer & materials</h2></div><button class="icon-button" id="closeGlobalSettings" type="button" aria-label="Close settings">×</button></div>
-          <p class="panel-intro">Most people can leave these defaults alone. They control printability checks, color separation, mesh detail, and pricing for every tool.</p>
-          <section class="panel-section production-section">
-            <div class="section-title"><span>Production profile</span><button id="profileInfoButton">How it works</button></div>
+          <p class="panel-intro">Choose the colors you want to print. Printer details are already set to safe defaults and can be opened only when you need them.</p>
+          <section class="panel-section palette-section">
+            <div class="section-title"><span>Colors in this medal</span><button id="editStockButton">My filament stock</button></div>
+            <div class="color-budget" aria-label="Number of design colors"><span>Add or remove colors</span><div class="color-stepper" id="colorCount"><button type="button" id="removeDesignColor" aria-label="Remove one design color">−</button><input id="designColorCount" type="number" min="1" max="16" step="1" value="3" aria-label="Number of design colors"><button type="button" id="addDesignColor" aria-label="Add one design color">＋</button></div></div>
+            <div id="palette" class="palette"></div>
+            <small class="panel-hint">Each color becomes a separate aligned piece in the recommended 3MF print file.</small>
+          </section>
+          <details class="settings-advanced">
+            <summary><span><strong>Printer defaults</strong><small id="printerDefaultsSummary">0.4 mm nozzle · 0.20 mm layers</small></span><b>Advanced</b></summary>
+            <section class="panel-section production-section">
+            <div class="section-title"><span>Printer profile</span><button id="profileInfoButton">How it works</button></div>
             <label class="field-label">Nozzle size</label>
             <div class="segmented" id="nozzleSelect" role="radiogroup" aria-label="Nozzle size">
-              <button data-nozzle="0.2">0.2</button><button data-nozzle="0.4" class="active">0.4</button><button data-nozzle="0.6">0.6</button><button data-nozzle="0.8">0.8</button>
+              <button type="button" role="radio" aria-checked="false" data-nozzle="0.2">0.2</button><button type="button" role="radio" aria-checked="true" data-nozzle="0.4" class="active">0.4</button><button type="button" role="radio" aria-checked="false" data-nozzle="0.6">0.6</button><button type="button" role="radio" aria-checked="false" data-nozzle="0.8">0.8</button>
             </div>
-            <div class="profile-note"><span>Robust detail target</span><strong id="safeDetail">≥ 0.90 mm</strong></div>
+            <div class="profile-note"><span>Smallest recommended detail</span><strong id="safeDetail">≥ 0.90 mm</strong></div>
             <div class="profile-controls">
               <label><span>Layer height</span><div class="unit-input"><input id="layerHeightInput" type="number" min="0.05" max="0.5" step="0.05" value="0.2"/><em>mm</em></div></label>
               <label><span>Color system</span><select id="colorSystem" class="select-input"><option value="multicolor">Multicolor unit</option><option value="manual">Manual layer swaps</option></select></label>
-              <label><span>Mesh detail</span><select id="meshQuality" class="select-input"><option value="balanced">Balanced</option><option value="fine" selected>Fine</option><option value="ultra">Ultra</option><option value="draft">Draft</option></select></label>
+              <label><span>3D model &amp; export detail</span><select id="meshQuality" class="select-input"><option value="balanced">Balanced</option><option value="fine" selected>Fine</option><option value="ultra">Ultra</option><option value="draft">Draft</option></select></label>
             </div>
             <label class="check-row"><input type="checkbox" id="hardenedNozzle" /><span><strong>Hardened nozzle</strong><small>Needed by some abrasive effects</small></span></label>
-          </section>
-          <section class="panel-section palette-section">
-            <div class="section-title"><span>Design colors</span><button id="editStockButton">Manage filament stock</button></div>
-            <div class="color-budget" aria-label="Number of design colors"><span>Colors in this medal</span><div class="color-stepper" id="colorCount"><button type="button" id="removeDesignColor" aria-label="Remove one design color">−</button><input id="designColorCount" type="number" min="1" max="16" step="1" value="3" aria-label="Number of design colors"><button type="button" id="addDesignColor" aria-label="Add one design color">＋</button></div></div>
-            <div id="palette" class="palette"></div>
-            <small class="panel-hint">Each design color becomes a separate 3MF material part. Stock, special effects, density, and cost stay on this device.</small>
-          </section>
+            </section>
+          </details>
         </div>
       </aside>
 
@@ -205,19 +220,19 @@
         <div class="template-gallery-backdrop" data-close-gallery></div>
         <section class="template-gallery-sheet">
           <div class="global-settings-head"><div><span class="eyebrow">Editable starting points</span><h2>Medal gallery</h2></div><button class="icon-button" id="closeTemplateGallery" type="button" aria-label="Close examples">×</button></div>
-          <p class="panel-intro">A small collection of finished, production-ready medals. Every line, word, color, face, and ribbon attachment remains editable; loading one is undoable.</p>
+          <p class="panel-intro">A small collection of polished, print-aware starting points. Every line, word, color, side, and ribbon attachment remains editable.</p>
           <div class="gallery-curation-note"><span aria-hidden="true">✦</span><p><strong>Real printable geometry</strong><small>The previews below are drawn from each editable medal—not mockup artwork.</small></p></div>
           <div class="template-list" id="templateGalleryList"></div>
         </section>
       </aside>
 
       <footer class="quote-bar">
-        <button class="print-status" id="openChecksButton" type="button" title="Open manufacturing checks"><span class="status-orb pass" id="footerOrb"></span><span><small>Print check</small><strong id="footerStatus">Ready for 0.4 mm</strong></span></button>
+        <button class="print-status" id="openChecksButton" type="button" title="Open design checks"><span class="status-orb pass" id="footerOrb"></span><span><small>Editor check</small><strong id="footerStatus">Checks passed · verify in slicer</strong></span></button>
         <div class="quote-controls">
-          <label>Quantity<select id="quantity"><option>1</option><option>10</option><option selected>25</option><option>50</option><option>100</option></select></label>
-          <div class="price"><small>Per medal</small><strong id="unitPrice">Kč 119</strong></div>
+          <label>Quantity<input id="quantity" type="number" min="1" max="10000" step="1" value="25" inputmode="numeric" aria-label="Quantity to estimate"></label>
+          <div class="price"><small>Estimate / medal</small><strong id="unitPrice">Kč 119</strong></div>
           <div class="price total"><small>Estimated total</small><strong id="totalPrice">Kč 2,975</strong></div>
-          <button class="button review" id="reviewOrder">Price details <span>→</span></button>
+          <button class="button review" id="reviewOrder">Estimate details <span>→</span></button>
         </div>
       </footer>
     </div>
@@ -231,6 +246,7 @@
       </div>
     </dialog>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script type="module" src="../../assets/medals/app.js?v=20260830-release8"></script>
+    <output class="sr-only" id="a11yStatus" aria-live="polite"></output>
+    <script type="module" src="../../assets/medals/app.js?v=20260831-release20"></script>
   </body>
 </html>

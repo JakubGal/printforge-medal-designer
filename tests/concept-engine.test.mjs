@@ -148,14 +148,17 @@ test('generated projects pass project normalization and respect printability lim
   }
 });
 
-test('nozzle-aware scaling keeps all four concepts free of blocking production checks', () => {
+test('nozzle-aware polishing keeps all four concepts free of blockers and one-line details', () => {
   for (const nozzle of [.2, .4, .6, .8]) {
     const projects = generateMedalProjects('A technical 75 km cycling race in Ostrava on 2030-06-06', {
       manufacturing: { nozzle, layerHeight: nozzle / 2 },
     });
     for (const project of projects) {
-      const blocks = buildChecks(project, DEFAULT_INVENTORY).filter(check => check.level === 'block');
+      const checks = buildChecks(project, DEFAULT_INVENTORY);
+      const blocks = checks.filter(check => check.level === 'block');
+      const oneLine = checks.filter(check => /uses one-line detail/i.test(check.title));
       assert.deepEqual(blocks, [], `${project.name} has blocking checks for a ${nozzle} mm nozzle`);
+      assert.deepEqual(oneLine, [], `${project.name} retains one-line details for a ${nozzle} mm nozzle`);
     }
   }
 });

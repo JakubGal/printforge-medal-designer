@@ -1,8 +1,9 @@
-import { copyFile, mkdir, rm } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 const root = process.cwd();
 const destination = join(root, 'public');
+const releaseTag = '20260831-release20';
 const rootFiles = [
   'index.html',
   '404.html',
@@ -26,6 +27,7 @@ const medalFiles = [
   'local-image-provider.js',
   'local-medal-provider.js',
   'project-model.js',
+  'shape-library.js',
   'export-engine.js',
   'geometry-engine.js',
   'geometry-worker.js',
@@ -58,6 +60,17 @@ await mkdir(destination, { recursive: true });
 await Promise.all(rootFiles.map(file => copyProjectFile(file)));
 await Promise.all(workspaceFiles.map(file => copyProjectFile(file)));
 await Promise.all(medalFiles.map(file => copyProjectFile(file, join('assets', 'medals', file))));
+const browserModules = [
+  ...rootFiles.filter(file => file.endsWith('.js')).map(file => join(destination, file)),
+  ...medalFiles.filter(file => file.endsWith('.js')).map(file => join(medalAssetDestination, file)),
+];
+await Promise.all(browserModules.map(async file => {
+  const source = await readFile(file, 'utf8');
+  const versioned = source
+    .replace(/((?:from\s+|import\s*)['"])(\.\/[^'"]+\.js)(?:\?[^'"]*)?(['"])/g, `$1$2?v=${releaseTag}$3`)
+    .replace(/(new URL\(['"])(\.\/[^'"]+\.js)(?:\?[^'"]*)?(['"]\s*,\s*import\.meta\.url\))/g, `$1$2?v=${releaseTag}$3`);
+  await writeFile(file, versioned);
+}));
 await rm(cadKernelDestination, { recursive: true, force: true });
 await mkdir(cadKernelDestination, { recursive: true });
 await Promise.all([
