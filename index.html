@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f2f4ed" />
+    <meta name="description" content="Choose a focused, local-first workspace and customize a production-ready 3D printable product in your browser." />
+    <meta property="og:title" content="PrintForge — Parametric product studios" />
+    <meta property="og:description" content="Simple, product-specific tools for creating printable objects." />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="./og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="./og.png" />
+    <title>PrintForge — Choose a 3D product studio</title>
+    <link rel="stylesheet" href="./workspace-hub.css?v=20260830-release7" />
+  </head>
+  <body>
+    <header class="hub-header">
+      <a class="hub-brand" href="./" aria-label="PrintForge home">
+        <span class="hub-brand-mark" aria-hidden="true">P</span>
+        <span><strong>PrintForge</strong><small>Product studios</small></span>
+      </a>
+      <nav aria-label="Main navigation">
+        <a href="#studios">Studios</a>
+        <a href="#how-it-works">How it works</a>
+        <a class="header-cta" href="./workspaces/medals/">Open Medal Studio</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="heroTitle">
+        <div class="hero-copy">
+          <span class="eyebrow"><i></i> Local-first 3D customization</span>
+          <h1 id="heroTitle">Choose what you want to make. <em>Design it without CAD.</em></h1>
+          <p>Each studio is purpose-built for one printable product, with the right parameters, print checks, colors, pricing, and exports already built in.</p>
+          <div class="hero-actions">
+            <a class="primary-action" href="./workspaces/medals/">Design a medal <span>→</span></a>
+            <a class="secondary-action" href="#studios">Browse all studios</a>
+          </div>
+          <ul class="trust-row" aria-label="Platform benefits">
+            <li><strong>No CAD experience</strong><span>Guided product tools</span></li>
+            <li><strong>Runs on your device</strong><span>Low hosting cost</span></li>
+            <li><strong>Production files</strong><span>3MF, STL, STEP & PDF</span></li>
+          </ul>
+        </div>
+        <a class="hero-preview" href="./workspaces/medals/" aria-label="Open the medal design studio">
+          <img src="./og.png" alt="A polished multicolor 3D printable medal shown in the Medal Studio" />
+          <span class="preview-badge"><i></i> Medal Studio · Ready</span>
+          <span class="preview-caption"><strong>Design directly in 3D</strong><small>Click any face, move artwork, set depth, validate, export.</small></span>
+        </a>
+      </section>
+
+      <section class="studios" id="studios" aria-labelledby="studiosTitle">
+        <div class="section-heading">
+          <div><span class="eyebrow">Focused workspaces</span><h2 id="studiosTitle">Start with the product—not a blank CAD screen</h2></div>
+          <p>New studios plug into the same local geometry, material, image, pricing, and ordering foundation.</p>
+        </div>
+        <div class="workspace-grid" id="workspaceGrid" aria-live="polite">
+          <noscript><a class="noscript-card" href="./workspaces/medals/">Open Medal Studio</a></noscript>
+        </div>
+      </section>
+
+      <section class="workflow" id="how-it-works" aria-labelledby="workflowTitle">
+        <div class="workflow-intro"><span class="eyebrow">One familiar flow</span><h2 id="workflowTitle">From idea to printable file</h2><p>The shared platform does the technical work while each studio only shows the decisions that matter for that product.</p></div>
+        <ol>
+          <li><span>01</span><div><strong>Choose a studio</strong><p>Start with a medal, organizer, holder, or another focused product.</p></div></li>
+          <li><span>02</span><div><strong>Customize visually</strong><p>Edit dimensions, colors, text, images, and product-specific parameters.</p></div></li>
+          <li><span>03</span><div><strong>Check printability</strong><p>Nozzle-aware rules catch details, walls, unsupported geometry, and material issues.</p></div></li>
+          <li><span>04</span><div><strong>Export or order</strong><p>Download production files today; local-maker ordering can use the same project later.</p></div></li>
+        </ol>
+      </section>
+    </main>
+
+    <footer><span><strong>PrintForge</strong> · Local-first parametric product studios</span><a href="./workspaces/medals/">Launch Medal Studio →</a></footer>
+    <script type="module" src="./workspace-hub.js?v=20260830-release8"></script>
+  </body>
+</html>

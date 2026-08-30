@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f3f4ef" />
+    <meta name="description" content="Design clean, multicolor, 3D-printable medals in your browser." />
+    <meta property="og:title" content="MedalForge" />
+    <meta property="og:description" content="Design it. Check it. Print it." />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="../../og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="MedalForge multicolor printable medal designer" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="../../og.png" />
+    <title>MedalForge — Printable medal designer</title>
+    <link rel="stylesheet" href="../../assets/medals/styles.css?v=20260830-release7" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="../../" aria-label="Back to workspace gallery">
+          <span class="brand-mark">M</span>
+          <span>MedalForge</span>
+        </a>
+        <label class="project-title" for="projectNameInput">
+          <span class="eyebrow">Current design</span>
+          <input id="projectNameInput" value="Night Run 2026" maxlength="60" aria-label="Project name" />
+        </label>
+        <div class="top-actions">
+          <span class="mode-pill" title="Design and production files stay on this device; online image generation is used only when selected"><i></i> Local-first</span>
+          <span class="save-state" id="saveState">Saved locally</span>
+          <button class="button secondary compact-button" id="newDesignButton" type="button" title="Start or reset to a clean medal">New medal</button>
+          <button class="button secondary compact-button" id="examplesButton" type="button" aria-haspopup="dialog" aria-controls="templateGallery" aria-expanded="false">Examples</button>
+          <button class="button secondary settings-button" id="globalSettingsButton" type="button" aria-haspopup="dialog" aria-controls="globalSettingsDrawer" aria-expanded="false">
+            <span aria-hidden="true">⚙</span><span id="settingsSummary">0.4 mm · 3 colors</span>
+          </button>
+          <button class="button secondary compact-button" id="helpButton" type="button" aria-label="Open quick tour" title="Open quick tour">
+            <span class="help-label-full">Quick tour</span><span class="help-label-short" aria-hidden="true">?</span>
+          </button>
+          <button class="button secondary" id="saveButton">Save</button>
+          <button class="button primary" id="exportButton">Export files</button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <nav class="tool-rail" aria-label="Design tools">
+          <button class="tool active" data-panel="create"><span>＋</span>Add</button>
+          <button class="tool" data-panel="medal"><span>◉</span>Medal</button>
+          <button class="tool" data-panel="layers"><span>≡</span>Objects</button>
+          <button class="tool" id="newDesignRailButton" type="button"><span>↺</span>New</button>
+          <button class="tool" id="examplesRailButton" type="button" aria-haspopup="dialog" aria-controls="templateGallery" aria-expanded="false"><span>▦</span>Examples</button>
+          <button class="tool" id="globalSettingsRailButton" type="button" aria-haspopup="dialog" aria-controls="globalSettingsDrawer" aria-expanded="false"><span>⚙</span>Settings</button>
+        </nav>
+
+        <aside class="side-panel context-panel" aria-label="Contextual tool options">
+          <div id="toolPanelContent"></div>
+        </aside>
+
+        <section class="stage">
+          <div class="stage-toolbar">
+            <div class="workspace-mode" aria-live="polite">
+              <span class="workspace-mode-dot"></span>
+              <span><strong id="workspaceModeLabel">Model workspace</strong><small id="workspaceModeHelp">Drag artwork to move · drag its Z arrow for height</small></span>
+            </div>
+            <div class="stage-actions">
+              <button id="undoButton" title="Undo" aria-label="Undo">↶</button><button id="redoButton" title="Redo" aria-label="Redo">↷</button>
+              <span></span>
+              <button id="zoomOut" aria-label="Zoom out">−</button><strong id="zoomLabel">100%</strong><button id="zoomIn" aria-label="Zoom in">＋</button>
+            </div>
+          </div>
+          <div class="canvas-wrap" id="canvasWrap">
+            <div class="canvas-grid"></div>
+            <canvas id="medalCanvas" width="1000" height="760" hidden aria-label="Top sketch plane. Draw or drag selected objects, then finish the sketch to return to the 3D model."></canvas>
+            <canvas id="modelCanvas" width="1000" height="760" aria-label="Rotatable and selectable 3D model. Drag empty space to orbit, click artwork to select it, Shift-drag to pan, and scroll to zoom."></canvas>
+            <output class="surface-probe" id="surfaceProbe" hidden aria-live="polite"></output>
+            <div class="sketch-mode-bar" id="sketchModeBar" hidden>
+              <span><i></i><strong>Sketching on medal face</strong><small>Draw and position in the top plane</small></span>
+              <button class="button primary" id="finishSketchMode" type="button">Finish sketch</button>
+            </div>
+            <div class="placement-ghost" id="placementGhost" hidden>
+              <canvas id="placementGhostCanvas" width="320" height="120" aria-hidden="true"></canvas>
+              <span class="placement-ghost-copy"><strong id="placementGhostLabel">Place object</strong><small id="placementGhostSize">0 × 0 mm</small><em id="placementGhostFace">Front face</em></span>
+            </div>
+            <div class="push-pull-gizmo" id="pushPullGizmo" hidden aria-label="Selected object push pull control">
+              <button class="push-pull-axis" id="pushPullHandle" type="button" aria-label="Drag to raise, engrave, or cut"><span class="push-pull-line"></span><span class="push-pull-head">▲</span></button>
+              <output class="gizmo-label" id="pushPullLabel">Raised 0.60 mm</output>
+              <div class="gizmo-actions" id="gizmoActions">
+                <button id="gizmoPocketFill" type="button">Fill pocket</button>
+                <button id="gizmoCutThrough" type="button">Cut through</button>
+              </div>
+            </div>
+            <svg class="transform-gizmo" id="transformGizmo" hidden aria-label="Selected object resize and rotate controls">
+              <polygon id="transformOutline" points="" />
+              <line id="transformRotateStem" />
+              <circle class="transform-handle rotate" id="transformRotateHandle" r="7" data-transform-handle="rotate" role="button" tabindex="0" aria-label="Rotate selected object. Use arrow keys for precise rotation." />
+              <circle class="transform-handle move" id="transformMoveHandle" r="10" data-transform-handle="move" role="button" tabindex="0" aria-label="Move selected object. Use arrow keys for precise movement." />
+              <rect class="transform-handle" id="transformLeftHandle" width="13" height="13" rx="3" data-transform-handle="resize-x" data-transform-direction="-1,0" role="button" tabindex="0" aria-label="Resize selected object from the left. Use arrow keys for precise sizing." />
+              <rect class="transform-handle" id="transformWidthHandle" width="13" height="13" rx="3" data-transform-handle="resize-x" data-transform-direction="1,0" role="button" tabindex="0" aria-label="Resize selected object width. Use arrow keys for precise sizing." />
+              <rect class="transform-handle" id="transformTopHandle" width="13" height="13" rx="3" data-transform-handle="resize-y" data-transform-direction="0,-1" role="button" tabindex="0" aria-label="Resize selected object from the top. Use arrow keys for precise sizing." />
+              <rect class="transform-handle" id="transformHeightHandle" width="13" height="13" rx="3" data-transform-handle="resize-y" data-transform-direction="0,1" role="button" tabindex="0" aria-label="Resize selected object height. Use arrow keys for precise sizing." />
+              <rect class="transform-handle primary" id="transformTopLeftHandle" width="15" height="15" rx="3" data-transform-handle="resize-xy" data-transform-direction="-1,-1" role="button" tabindex="0" aria-label="Scale selected object from the top left. Use arrow keys for precise sizing." />
+              <rect class="transform-handle primary" id="transformTopRightHandle" width="15" height="15" rx="3" data-transform-handle="resize-xy" data-transform-direction="1,-1" role="button" tabindex="0" aria-label="Scale selected object from the top right. Use arrow keys for precise sizing." />
+              <rect class="transform-handle primary" id="transformBottomLeftHandle" width="15" height="15" rx="3" data-transform-handle="resize-xy" data-transform-direction="-1,1" role="button" tabindex="0" aria-label="Scale selected object from the bottom left. Use arrow keys for precise sizing." />
+              <rect class="transform-handle primary" id="transformCornerHandle" width="15" height="15" rx="3" data-transform-handle="resize-xy" data-transform-direction="1,1" role="button" tabindex="0" aria-label="Scale selected object from the bottom right. Use arrow keys for precise sizing." />
+            </svg>
+            <output class="transform-size-label" id="transformSizeLabel" hidden>0 × 0 mm</output>
+            <div class="selection-hud" id="selectionHud" hidden></div>
+            <div class="live-edit-bar" id="liveEditBar" hidden role="status" aria-live="polite">
+              <span><small>Live edit</small><strong id="liveEditLabel">Previewing change</strong></span>
+              <button type="button" id="cancelLiveEdit">Cancel</button>
+              <button type="button" class="confirm" id="acceptLiveEdit">OK</button>
+            </div>
+            <section class="quick-start" id="quickStart" hidden aria-label="Getting started">
+              <button class="quick-start-close" id="dismissQuickStart" aria-label="Dismiss getting started">×</button>
+              <span class="eyebrow">Your first printable medal</span>
+              <strong>Four quick steps</strong>
+              <ol id="quickStartSteps"></ol>
+            </section>
+            <div class="canvas-empty" id="canvasEmpty" hidden><strong>Add your first element</strong><span>Use Text, Upload, Shapes, or Draw.</span></div>
+            <div class="model-loading" id="modelLoading" hidden><span class="spinner"></span><strong>Building printable mesh…</strong><small id="modelLoadingText">Rasterizing the medal body</small></div>
+            <div class="viewer-toolbar" id="viewerToolbar" hidden aria-label="3D camera controls">
+              <div class="viewer-preset-group"><button class="active" data-camera="iso">Iso</button><button data-camera="top">Top</button><button data-camera="bottom">Bottom</button><button data-camera="front">Front</button><button data-camera="right">Right</button></div>
+              <button id="fitModel" title="Fit model to view">Fit</button>
+              <button id="toggleInspectLayers" title="Inspect exact print layers" aria-expanded="false">Layers</button>
+              <button id="projectionToggle" title="Toggle perspective">Perspective</button>
+              <button id="savePreview" title="Download a PNG of this view">PNG</button>
+            </div>
+            <aside class="slicer-dock" id="slicerDock" hidden aria-label="3D inspection controls">
+              <div class="slicer-dock-head"><span><small>Print preview</small><strong id="modelPartCount">Building…</strong></span><span class="local-badge">Local</span></div>
+              <label class="viewer-range"><span><b>Layer</b><output id="layerLabel">All</output></span><input id="layerSlider" type="range" min="0" max="1" value="1" /></label>
+              <label class="viewer-range"><span><b>Explode colors</b><output id="explodeLabel">0 mm</output></span><input id="explodeSlider" type="range" min="0" max="12" step="0.5" value="0" /></label>
+              <label class="viewer-check"><input id="viewerGrid" type="checkbox" checked /><span>Build plate grid</span></label>
+              <label class="viewer-check ribbon-preview-toggle"><input id="viewerRibbon" type="checkbox" /><span>Show attached ribbon <small>Preview only · never exported</small></span><input id="viewerRibbonColor" type="color" value="#2458d8" aria-label="Ribbon preview color" /></label>
+              <button class="full-button slice-view-button" id="open2dSlice" type="button">Open exact 2D slice</button>
+              <div class="slicer-divider"></div>
+              <div class="viewer-parts-title"><span>Color parts</span><button id="showAllParts">Show all</button></div>
+              <div class="viewer-parts" id="viewerParts"></div>
+              <div class="model-stats" id="modelStats"></div>
+              <p class="viewer-help">Drag empty space to rotate · click artwork for its push/pull arrow · scrub filled layer cross-sections · Shift/right drag to pan · wheel/pinch to zoom</p>
+            </aside>
+            <aside class="layer-dock" id="layerDock" hidden aria-label="Layer preview controls">
+              <div class="slicer-dock-head"><span><small>2D slice</small><strong id="sliceLayerTitle">Top surface</strong></span><span class="slice-dock-actions"><span class="local-badge" id="sliceExactBadge">Exact Z</span><button type="button" id="close2dSlice" class="local-badge">Back to 3D</button></span></div>
+              <label class="viewer-range"><span><b>Layer</b><output id="sliceLayerLabel">12 / 15</output></span><input id="sliceLayerSlider" type="range" min="1" max="15" value="12" /></label>
+              <div class="slice-legend"><span><i class="slice-base"></i>Solid at this layer</span><span><i class="slice-hole"></i>Air / cut</span></div>
+              <small class="slice-status" id="sliceStatus">Compiled from the printable heightfield.</small>
+              <p class="viewer-help">Move through the build one physical layer at a time. Engravings become air; inlays show their assigned filament.</p>
+            </aside>
+            <div class="size-chip"><span>↔</span><strong id="diameterLabel">60 mm</strong></div>
+            <div class="compute-chip"><span></span><strong>Computed on this device</strong></div>
+          </div>
+          <div class="stage-footer">
+            <span id="stageHint">Select and drag an element to position it</span>
+            <span><kbd>Del</kbd> delete · <kbd>[ ]</kbd> Z by layer · <kbd>Ctrl Z</kbd> undo · arrows move</span>
+          </div>
+        </section>
+
+        <aside class="inspector inspector-drawer" aria-label="Objects, selected element, and manufacturing checks">
+          <section class="object-browser">
+            <div class="object-browser-head"><div><span class="eyebrow">CAD tree</span><h2>Objects</h2></div><button class="icon-button" id="addObjectGroup" type="button" title="Create a group" aria-label="Create a group">＋</button></div>
+            <div id="objectTree"></div>
+          </section>
+          <div class="divider"></div>
+          <div id="selectionInspector"></div>
+          <div class="divider"></div>
+          <details class="manufacturing-summary">
+            <summary><span><small>Manufacturing check</small><strong id="checkTitle">Ready to print</strong></span><span class="status-orb pass" id="checkOrb"></span></summary>
+            <p class="check-summary" id="checkSummary">All current features meet the selected profile.</p>
+            <div id="issues" class="issue-list"></div>
+            <button class="full-button" id="reviewButton">Review all checks</button>
+          </details>
+        </aside>
+      </main>
+
+      <aside class="global-settings" id="globalSettingsDrawer" hidden role="dialog" aria-modal="true" aria-label="Global printer and material settings">
+        <div class="global-settings-backdrop" data-close-settings></div>
+        <div class="global-settings-sheet">
+          <div class="global-settings-head"><div><span class="eyebrow">Defaults for this project</span><h2>Printer & materials</h2></div><button class="icon-button" id="closeGlobalSettings" type="button" aria-label="Close settings">×</button></div>
+          <p class="panel-intro">Most people can leave these defaults alone. They control printability checks, color separation, mesh detail, and pricing for every tool.</p>
+          <section class="panel-section production-section">
+            <div class="section-title"><span>Production profile</span><button id="profileInfoButton">How it works</button></div>
+            <label class="field-label">Nozzle size</label>
+            <div class="segmented" id="nozzleSelect" role="radiogroup" aria-label="Nozzle size">
+              <button data-nozzle="0.2">0.2</button><button data-nozzle="0.4" class="active">0.4</button><button data-nozzle="0.6">0.6</button><button data-nozzle="0.8">0.8</button>
+            </div>
+            <div class="profile-note"><span>Robust detail target</span><strong id="safeDetail">≥ 0.90 mm</strong></div>
+            <div class="profile-controls">
+              <label><span>Layer height</span><div class="unit-input"><input id="layerHeightInput" type="number" min="0.05" max="0.5" step="0.05" value="0.2"/><em>mm</em></div></label>
+              <label><span>Color system</span><select id="colorSystem" class="select-input"><option value="multicolor">Multicolor unit</option><option value="manual">Manual layer swaps</option></select></label>
+              <label><span>Mesh detail</span><select id="meshQuality" class="select-input"><option value="balanced">Balanced</option><option value="fine" selected>Fine</option><option value="ultra">Ultra</option><option value="draft">Draft</option></select></label>
+            </div>
+            <label class="check-row"><input type="checkbox" id="hardenedNozzle" /><span><strong>Hardened nozzle</strong><small>Needed by some abrasive effects</small></span></label>
+          </section>
+          <section class="panel-section palette-section">
+            <div class="section-title"><span>Design colors</span><button id="editStockButton">Manage filament stock</button></div>
+            <div class="color-budget" aria-label="Number of design colors"><span>Colors in this medal</span><div class="color-stepper" id="colorCount"><button type="button" id="removeDesignColor" aria-label="Remove one design color">−</button><input id="designColorCount" type="number" min="1" max="16" step="1" value="3" aria-label="Number of design colors"><button type="button" id="addDesignColor" aria-label="Add one design color">＋</button></div></div>
+            <div id="palette" class="palette"></div>
+            <small class="panel-hint">Each design color becomes a separate 3MF material part. Stock, special effects, density, and cost stay on this device.</small>
+          </section>
+        </div>
+      </aside>
+
+      <aside class="template-gallery" id="templateGallery" hidden role="dialog" aria-modal="true" aria-label="Example medal gallery">
+        <div class="template-gallery-backdrop" data-close-gallery></div>
+        <section class="template-gallery-sheet">
+          <div class="global-settings-head"><div><span class="eyebrow">Editable starting points</span><h2>Medal gallery</h2></div><button class="icon-button" id="closeTemplateGallery" type="button" aria-label="Close examples">×</button></div>
+          <p class="panel-intro">Every line, word, color, and silhouette remains editable. Loading an example is undoable.</p>
+          <div class="gallery-quality-targets" aria-label="Medal quality targets">
+            <figure><img src="../../assets/medals/quality-target-user.png" alt="Studio board of the three supplied physical medal references" loading="lazy"><figcaption><strong>Your reference collection</strong><span>Faithful layout and color-body targets for the editable examples.</span></figcaption></figure>
+            <figure><img src="../../assets/medals/quality-target-original.png" alt="Studio board of four original premium printable medal concepts" loading="lazy"><figcaption><strong>Premium original collection</strong><span>Visual ceiling for smooth vectors, typography, rims, and color separation.</span></figcaption></figure>
+          </div>
+          <div class="template-list" id="templateGalleryList"></div>
+        </section>
+      </aside>
+
+      <footer class="quote-bar">
+        <button class="print-status" id="openChecksButton" type="button" title="Open manufacturing checks"><span class="status-orb pass" id="footerOrb"></span><span><small>Print check</small><strong id="footerStatus">Ready for 0.4 mm</strong></span></button>
+        <div class="quote-controls">
+          <label>Quantity<select id="quantity"><option>1</option><option>10</option><option selected>25</option><option>50</option><option>100</option></select></label>
+          <div class="price"><small>Per medal</small><strong id="unitPrice">Kč 119</strong></div>
+          <div class="price total"><small>Estimated total</small><strong id="totalPrice">Kč 2,975</strong></div>
+          <button class="button review" id="reviewOrder">Price details <span>→</span></button>
+        </div>
+      </footer>
+    </div>
+
+    <input id="assetInput" type="file" hidden accept="image/png,image/jpeg,image/svg+xml,.dxf" />
+    <input id="projectInput" type="file" hidden accept="application/json,.json" />
+    <dialog id="appDialog" aria-labelledby="dialogTitle">
+      <div class="dialog-shell">
+        <div class="dialog-header"><div><span class="eyebrow" id="dialogEyebrow">MedalForge</span><h2 id="dialogTitle">Dialog</h2></div><button class="icon-button" id="dialogClose" aria-label="Close dialog">×</button></div>
+        <div id="dialogBody" class="dialog-body"></div>
+      </div>
+    </dialog>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="../../assets/medals/app.js?v=20260830-release7"></script>
+  </body>
+</html>
