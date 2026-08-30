@@ -6,6 +6,8 @@ studio. Future studios can reuse the same browser geometry, materials, image
 cleanup, pricing, validation, storage, and export foundation while exposing only
 the controls that matter for their product.
 
+**Live preview:** [Open PrintForge on GitHub Pages](https://jakubgal.github.io/printforge-medal-designer/)
+
 MedalForge is a CAD-style workspace for users without CAD experience: orbit
 above or below the medal, hover exact printable faces, place correctly oriented
 artwork on either side, drag and scale objects directly on the model, and use

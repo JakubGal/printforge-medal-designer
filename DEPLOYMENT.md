@@ -24,8 +24,12 @@ Official references:
 - [GitHub Pages limits and usage policy](https://docs.github.com/en/enterprise-cloud@latest/pages/getting-started-with-github-pages/github-pages-limits)
 - [GitHub Pages and custom domains](https://docs.github.com/en/pages)
 
-No production site, DNS record, remote repository, account, or paid service is
-created by this repository setup.
+The public GitHub Pages preview is live at
+[jakubgal.github.io/printforge-medal-designer](https://jakubgal.github.io/printforge-medal-designer/)
+from the `main` branch of
+[JakubGal/printforge-medal-designer](https://github.com/JakubGal/printforge-medal-designer).
+It is the review/demo origin, not the eventual commercial production domain.
+No custom DNS record or paid service is configured.
 
 ## What the static release includes
 
@@ -128,13 +132,10 @@ missing asset requests to HTML.
 lint and tests, builds the static artifact, and uploads only `public/`. It runs
 on manual dispatch or a push to `main`.
 
-Before it can run, the repository owner must deliberately:
-
-1. review and commit the current files;
-2. create or rename the release branch to `main`;
-3. add the intended Git remote and push it;
-4. enable **GitHub Actions** as the Pages source in repository settings;
-5. run the workflow and inspect the generated preview.
+The repository, `main` branch, GitHub Actions Pages source, HTTPS preview, and
+first successful workflow deployment are configured. Future reviewed pushes to
+`main` automatically rerun all release gates and replace the preview only after
+the build succeeds. A manual run remains available from the Actions tab.
 
 The site uses relative asset and workspace URLs, includes `.nojekyll`, and its
 404 home link detects a GitHub repository subpath. Do not use this route as the
