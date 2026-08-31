@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 
 const root = process.cwd();
 const destination = join(root, 'public');
-const releaseTag = '20260831-release20';
+const releaseTag = '20260831-release22';
 const rootFiles = [
   'index.html',
   '404.html',
@@ -27,6 +27,7 @@ const medalFiles = [
   'local-image-provider.js',
   'local-medal-provider.js',
   'project-model.js',
+  'medal-preview.js',
   'shape-library.js',
   'export-engine.js',
   'geometry-engine.js',

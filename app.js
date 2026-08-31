@@ -59,6 +59,7 @@ import { LocalMedalPlanProvider } from './local-medal-provider.js';
 import { OpenAiMedalProvider } from './openai-medal-provider.js';
 import { CURATED_EXAMPLE_INFO, createCuratedExample } from './curated-examples.js';
 import { RUNTIME_CONFIG, unavailableHostedCapability } from './runtime-config.js';
+import { attachmentOpeningLabel, medalOverallSizeLabel, medalSizeLabel, medalTopViewSvg } from './medal-preview.js';
 
 const QA_FIXTURE_ALIASES = Object.freeze({
   'final-premium-medal': 'showcase-night',
@@ -1543,6 +1544,56 @@ function updateMedalThicknessSummary() {
   });
 }
 
+function exactMedalPreview(project, options = {}) {
+  const palette = getPalette(project, state.inventory);
+  const medal = project.medal;
+  const body = palette[Math.max(0, Math.min(palette.length - 1, Number(medal.baseColor) || 0))];
+  const rim = palette[Math.max(0, Math.min(palette.length - 1, Number(medal.rimColor) || 0))];
+  const attachmentIndex = medal.attachmentColor === null || medal.attachmentColor === undefined ? Number(medal.baseColor) || 0 : Number(medal.attachmentColor) || 0;
+  const attachment = palette[Math.max(0, Math.min(palette.length - 1, attachmentIndex))];
+  return medalTopViewSvg(project, {
+    bodyColor: body?.color,
+    rimColor: rim?.color,
+    attachmentColor: attachment?.color,
+    ...options,
+  });
+}
+
+function fitInternalAttachmentToBody(project) {
+  if (!['eyelet', 'slit', 'open-slit'].includes(project.medal.loopStyle)) return project;
+  const containsOpening = () => {
+    const geometry = medalAttachmentGeometry(project);
+    if (geometry.aperture?.kind === 'circle') {
+      const radius = geometry.aperture.diameter / 2;
+      return Array.from({ length: 24 }, (_, index) => {
+        const angle = index * Math.PI * 2 / 24;
+        return medalContainsPoint(project, geometry.aperture.cx + Math.cos(angle) * radius, geometry.aperture.cy + Math.sin(angle) * radius);
+      }).every(Boolean);
+    }
+    const aperture = geometry.aperture;
+    if (!aperture) return true;
+    return [[aperture.x0, aperture.cy], [aperture.x1, aperture.cy], [aperture.x0 + aperture.height / 2, aperture.y1], [aperture.x1 - aperture.height / 2, aperture.y1], ...(geometry.style === 'slit' ? [[0, aperture.y0]] : [])]
+      .every(([x, y]) => medalContainsPoint(project, x, y));
+  };
+  const maximum = Math.max(0, Number(project.medal.height || project.medal.diameter) / 2 - .5);
+  for (let inset = Number(project.medal.attachmentInset) || 0; inset <= maximum; inset += .25) {
+    project.medal.attachmentInset = Math.round(inset * 100) / 100;
+    if (containsOpening()) return project;
+  }
+  return project;
+}
+
+function attachmentPreviewProject(project, style) {
+  const candidate = structuredClone(project);
+  candidate.medal = { ...candidate.medal, loopStyle: style };
+  return normalizeProject(fitInternalAttachmentToBody(normalizeProject(candidate)));
+}
+
+function attachmentChoiceMarkup(project, style, info, attributes = '') {
+  const candidate = attachmentPreviewProject(project, style);
+  return `<button type="button" ${attributes} class="attachment-card ${project.medal.loopStyle === style ? 'active' : ''}" data-attachment-style="${style}"><span class="attachment-geometry-icon">${exactMedalPreview(candidate, { compact: true, showDimensions: false, label: `${info.label} on ${candidate.medal.shape} medal` })}</span><strong>${escapeHtml(info.label)}</strong><small>${escapeHtml(info.description)}</small></button>`;
+}
+
 function medalPanel() {
   const medal = state.project.medal;
   const thickness = medalThicknessMetrics();
@@ -1555,7 +1606,6 @@ function medalPanel() {
     ['octagon','⯃','Octagon'],['scalloped','✿','Scalloped'],['star','★','Star'],['gear','⚙','Gear'],['shield','♢','Shield'],
   ];
   if (medal.outline?.length >= 3) outlines.push(['custom','✦','Custom']);
-  const attachmentIcons = { single: '▭', double: '▥', eyelet: '○', slit: '▬', 'open-slit': '⊤', none: '—' };
   const ribbonPresets = medal.loopStyle === 'none' || medal.loopStyle === 'eyelet' ? '' : `<div class="ribbon-presets"><span>Ribbon fit</span><button type="button" data-ribbon-preset="22">22 mm</button><button type="button" data-ribbon-preset="25" class="recommended">25 mm standard</button><button type="button" data-ribbon-preset="38">38 mm wide</button></div><small class="field-help">Preset adds practical clearance; print and pull-test the final attachment with your actual ribbon.</small>`;
   const attachmentFields = ['single', 'double'].includes(medal.loopStyle)
     ? `<div class="dimension-grid"><label>Bar width<input data-medal-field="loopWidth" type="number" min="12" max="60" step="0.5" value="${medal.loopWidth}" /></label><label>Bar height<input data-medal-field="loopHeight" type="number" min="5" max="18" step="0.5" value="${medal.loopHeight}" /></label><label>Opening width<input data-medal-field="slotWidth" type="number" min="6" max="55" step="0.5" value="${medal.slotWidth}" /></label><label>Opening height<input data-medal-field="slotHeight" type="number" min="2" max="16" step="0.2" value="${medal.slotHeight}" /></label></div>`
@@ -1595,7 +1645,7 @@ function medalPanel() {
     <details class="friendly-disclosure"><summary>Fine-tune edge size</summary><div class="dimension-grid edge-dimensions"><label>Edge width<input data-medal-field="rimWidth" type="number" min="0" max="${DESIGN_LIMITS.rimWidthMax}" step="0.1" value="${medal.rimWidth}" /></label><label>Edge height<input data-medal-field="rimHeight" type="number" min="0.1" max="${DESIGN_LIMITS.rimHeightMax}" step="${state.project.profile.layerHeight}" value="${medal.rimHeight}" /></label></div></details>
     <small class="field-help">The border is real multicolor geometry in the 3D preview, quote, 3MF, STL, and technical sheet.</small>
     <label class="field-label">Ribbon attachment</label>
-    <div class="attachment-picker">${Object.entries(ATTACHMENT_STYLE_INFO).map(([key, info]) => `<button type="button" class="attachment-card ${medal.loopStyle === key ? 'active' : ''}" data-attachment-style="${key}"><b>${attachmentIcons[key]}</b><strong>${escapeHtml(info.label)}</strong><small>${escapeHtml(info.description)}</small></button>`).join('')}</div>
+    <div class="attachment-picker">${Object.entries(ATTACHMENT_STYLE_INFO).map(([key, info]) => attachmentChoiceMarkup(state.project, key, info)).join('')}</div>
     <div class="attachment-fields">${ribbonPresets}<details class="friendly-disclosure"><summary>Fine-tune ribbon opening</summary><div>${attachmentFields}</div></details></div>
     <details class="advanced-disclosure"><summary>Advanced construction settings</summary><div class="dimension-grid"><label>New-item height<input data-medal-field="defaultHeight" type="number" min="0.1" max="${DESIGN_LIMITS.reliefHeightMax}" step="${state.project.profile.layerHeight}" value="${medal.defaultHeight}" /></label><label>Minimum solid floor<input data-medal-field="minimumFloor" type="number" min="0.6" max="${Math.max(.6, medal.baseThickness - .2)}" step="0.1" value="${medal.minimumFloor}" /></label><label>Edge inset<input data-medal-field="edgeInset" type="number" min="0" max="5" step="0.1" value="${medal.edgeInset}" /></label></div></details>
     <div class="upload-note"><strong>Every attachment is a real through-cut.</strong><br/>Exact layer preview and export use the same printable geometry shown in the model.</div>`;
@@ -2193,6 +2243,7 @@ function bindToolPanel() {
   }));
   $$('[data-attachment-style]').forEach(button => button.addEventListener('click', () => commit(project => {
     project.medal.loopStyle = button.dataset.attachmentStyle;
+    fitInternalAttachmentToBody(project);
     project.template = 'custom';
   }, { panel: true })));
   $$('[data-rim-style]').forEach(button => button.addEventListener('click', () => commit(project => {
@@ -2339,6 +2390,7 @@ function bindToolPanel() {
         project.medal.diameter = Math.min(project.medal.width, project.medal.height);
         project.medal.width = project.medal.height = project.medal.diameter;
       }
+      fitInternalAttachmentToBody(project);
       project.template = 'custom';
     }, { panel: true });
     markOnboardingStep('medal');
@@ -4857,7 +4909,45 @@ function wizardProject(wizard = state.wizard) {
     ...(distance ? [conceptText('Distance', distance.toUpperCase(), 0, 0, Math.max(5, Math.min(10, safeWidth / Math.max(1, distance.length * .59))), color, { zHeight: .6 })] : []),
     ...(date ? [conceptText('Event date', date, 0, size * .2, Math.max(3, Math.min(5.5, safeWidth / Math.max(1, date.length * .59))), color, { zHeight: .6 })] : []),
   ];
-  return normalizeProject(project);
+  return normalizeProject(fitInternalAttachmentToBody(normalizeProject(project)));
+}
+
+function wizardPreviewProject(wizard, overrides = {}) {
+  return wizardProject({
+    ...wizard,
+    ...overrides,
+    attachmentSettings: { ...wizard.attachmentSettings, ...(overrides.attachmentSettings || {}) },
+  });
+}
+
+function wizardLivePreviewMarkup(project) {
+  const attachment = ATTACHMENT_STYLE_INFO[project.medal.loopStyle];
+  return `<figure class="wizard-live-preview"><div class="wizard-live-preview-canvas">${exactMedalPreview(project, { showDimensions: true, label: `Exact 2D top view of ${project.medal.shape} medal with ${attachment.label}` })}</div><figcaption><span class="wizard-preview-kicker">Live 2D preview · exact printable outline</span><strong>${escapeHtml(project.medal.shape[0].toUpperCase() + project.medal.shape.slice(1))} medal with ${escapeHtml(attachment.label.toLowerCase())}</strong><div class="wizard-preview-facts"><span><b>Body</b>${escapeHtml(medalSizeLabel(project))}</span><span><b>Finished footprint</b>${escapeHtml(medalOverallSizeLabel(project))}</span><span><b>Ribbon</b>${escapeHtml(attachmentOpeningLabel(project))}</span></div></figcaption></figure>`;
+}
+
+function wizardShapeChoiceMarkup(wizard, shape, label) {
+  const project = wizardPreviewProject(wizard, { shape });
+  return `<button type="button" role="radio" aria-checked="${wizard.shape === shape}" class="wizard-choice wizard-shape-choice ${wizard.shape === shape ? 'active' : ''}" data-wizard-shape="${shape}"><span class="wizard-choice-geometry" data-wizard-shape-preview="${shape}">${exactMedalPreview(project, { compact: true, showDimensions: false, label: `${label} medal with ${ATTACHMENT_STYLE_INFO[project.medal.loopStyle].label}` })}</span><span>${escapeHtml(label)}</span><small><em data-wizard-shape-size="${shape}">${escapeHtml(medalSizeLabel(project))}</em> printable body</small></button>`;
+}
+
+function wizardAttachmentChoiceMarkup(wizard, style, info) {
+  const project = wizardPreviewProject(wizard, { attachment: style });
+  return `<button type="button" role="radio" aria-checked="${wizard.attachment === style}" class="attachment-card wizard-attachment-choice ${wizard.attachment === style ? 'active' : ''}" data-wizard-attachment="${style}"><span class="attachment-geometry-icon">${exactMedalPreview(project, { compact: true, showDimensions: false, label: `${info.label} on the selected ${project.medal.shape} medal` })}</span><strong>${escapeHtml(info.label)}</strong><small>${escapeHtml(info.description)}</small><em>${escapeHtml(attachmentOpeningLabel(project))}</em></button>`;
+}
+
+function refreshWizardGeometryPreviews({ shapes = false } = {}) {
+  const wizard = state.wizard;
+  if (!wizard) return;
+  const project = wizardProject(wizard);
+  $$('[data-wizard-live-preview]').forEach(host => { host.innerHTML = wizardLivePreviewMarkup(project); });
+  if (!shapes) return;
+  $$('[data-wizard-shape-preview]').forEach(host => {
+    const shape = host.dataset.wizardShapePreview;
+    const candidate = wizardPreviewProject(wizard, { shape });
+    host.innerHTML = exactMedalPreview(candidate, { compact: true, showDimensions: false, label: `${shape} medal with ${ATTACHMENT_STYLE_INFO[candidate.medal.loopStyle].label}` });
+    const size = host.closest('[data-wizard-shape]')?.querySelector('[data-wizard-shape-size]');
+    if (size) size.textContent = medalSizeLabel(candidate);
+  });
 }
 
 function wizardAttachmentFields(wizard) {
@@ -4879,7 +4969,6 @@ function renderNewDesignWizard() {
   const wizard = state.wizard;
   if (!wizard || !dialog.open) return;
   const titles = ['Choose a starting point', 'Choose the medal body', 'Choose the ribbon attachment', wizard.template === 'blank' ? 'Tell us about your event' : 'Personalize the wording in 3D', 'Ready to design'];
-  const attachmentIcons = { single:'▭', double:'▥', eyelet:'◉', slit:'▬', 'open-slit':'↧', none:'○' };
   $('#dialogEyebrow').textContent = `New medal · step ${wizard.step + 1} of 5`;
   $('#dialogTitle').textContent = titles[wizard.step];
   const progress = `<div class="wizard-progress" aria-label="Step ${wizard.step + 1} of 5">${[0,1,2,3,4].map(step => `<i class="${step <= wizard.step ? 'done' : ''}"></i>`).join('')}</div>`;
@@ -4892,31 +4981,32 @@ function renderNewDesignWizard() {
       const project = wizardProject(wizard), info = GALLERY_TEMPLATE_INFO[wizard.template];
       content = `<div class="wizard-fixed-example">${templatePreviewMarkup(wizard.template, info)}<div><strong>The example keeps its tested ${project.medal.diameter} mm ${escapeHtml(project.medal.shape)} body</strong><p class="dialog-lede">This prevents its artwork from crossing the printable edge. Once opened, you can still change the body under Medal and the live checks will guide you.</p></div></div>`;
     } else {
-      const shapes = [['circle','●','Circle'],['rounded','▣','Rounded square'],['hexagon','⬢','Hexagon'],['scalloped','✿','Scalloped'],['shield','♢','Shield']];
-      content = `<p class="dialog-lede">Pick the overall shape and size. More unusual outlines remain available later under Medal.</p><div class="wizard-choice-grid" role="radiogroup" aria-label="Medal body shape">${shapes.map(([key, icon, label]) => `<button type="button" role="radio" aria-checked="${wizard.shape === key}" class="wizard-choice ${wizard.shape === key ? 'active' : ''}" data-wizard-shape="${key}"><b>${icon}</b><span>${label}</span><small>A robust printable ${label.toLowerCase()} base</small></button>`).join('')}</div><label class="wizard-size"><span>Overall size <output id="wizardSizeLabel">${wizard.size} mm</output></span><input id="wizardSize" type="range" min="${DESIGN_LIMITS.medalMin}" max="${DESIGN_LIMITS.medalMax}" step="1" value="${wizard.size}"></label>`;
+      const shapes = [['circle','Circle'],['rounded','Rounded square'],['hexagon','Hexagon'],['scalloped','Scalloped'],['shield','Shield']];
+      const project = wizardProject(wizard);
+      content = `<div class="wizard-setup-layout"><section class="wizard-setup-controls"><p class="dialog-lede">Pick the medal body. Every thumbnail already includes your chosen ribbon attachment, and the large diagram shows its real finished dimensions.</p><div class="wizard-choice-grid" role="radiogroup" aria-label="Medal body shape">${shapes.map(([key, label]) => wizardShapeChoiceMarkup(wizard, key, label)).join('')}</div><label class="wizard-size"><span>Medal body size <output id="wizardSizeLabel">${wizard.size} mm</output></span><input id="wizardSize" type="range" min="${DESIGN_LIMITS.medalMin}" max="${DESIGN_LIMITS.medalMax}" step="1" value="${wizard.size}"><small>The preview separately shows the exact body and finished size with the attachment.</small></label></section><aside data-wizard-live-preview aria-live="polite">${wizardLivePreviewMarkup(project)}</aside></div>`;
     }
   } else if (wizard.step === 2) {
     if (wizard.template !== 'blank') {
       const project = wizardProject(wizard), attachment = ATTACHMENT_STYLE_INFO[project.medal.loopStyle];
-      content = `<div class="wizard-fixed-example"><b class="wizard-attachment-icon">${attachmentIcons[project.medal.loopStyle] || '○'}</b><div><strong>${escapeHtml(attachment.label)} is fitted to this example</strong><p class="dialog-lede">It is fitted to the curated design and stays fully editable in the Medal tool after opening.</p></div></div>`;
+      content = `<div class="wizard-fixed-example"><span class="wizard-fixed-geometry">${exactMedalPreview(project, { compact: true, showDimensions: false })}</span><div><strong>${escapeHtml(attachment.label)} is fitted to this example</strong><p class="dialog-lede">This is the real top-view outline, including every opening. It stays fully editable in the Medal tool after opening.</p></div></div>`;
     } else {
-      content = `<p class="dialog-lede">Pick how the ribbon is fitted. Standard sizes include the needed printing clearance automatically.</p><div class="attachment-picker wizard-attachments" role="radiogroup" aria-label="Ribbon attachment">${Object.entries(ATTACHMENT_STYLE_INFO).map(([key, info]) => `<button type="button" role="radio" aria-checked="${wizard.attachment === key}" class="attachment-card ${wizard.attachment === key ? 'active' : ''}" data-wizard-attachment="${key}"><b>${attachmentIcons[key]}</b><strong>${escapeHtml(info.label)}</strong><small>${escapeHtml(info.description)}</small></button>`).join('')}</div>${['single','double','slit','open-slit'].includes(wizard.attachment) ? '<div class="ribbon-presets"><span>Ribbon width</span><button type="button" data-wizard-ribbon="22">22 mm</button><button type="button" data-wizard-ribbon="25" class="recommended">25 mm standard</button><button type="button" data-wizard-ribbon="38">38 mm wide</button></div>' : ''}<details class="friendly-disclosure"><summary>Fine-tune the opening</summary><div id="wizardAttachmentFields">${wizardAttachmentFields(wizard)}</div></details>`;
+      const project = wizardProject(wizard);
+      content = `<div class="wizard-setup-layout wizard-attachment-layout"><section class="wizard-setup-controls"><p class="dialog-lede">Pick how the ribbon is fitted. These are exact top views on your selected ${escapeHtml(project.medal.shape)} body—not generic symbols.</p><div class="attachment-picker wizard-attachments" role="radiogroup" aria-label="Ribbon attachment">${Object.entries(ATTACHMENT_STYLE_INFO).map(([key, info]) => wizardAttachmentChoiceMarkup(wizard, key, info)).join('')}</div>${['single','double','slit','open-slit'].includes(wizard.attachment) ? '<div class="ribbon-presets"><span>Ribbon width</span><button type="button" data-wizard-ribbon="22">22 mm</button><button type="button" data-wizard-ribbon="25" class="recommended">25 mm standard</button><button type="button" data-wizard-ribbon="38">38 mm wide</button></div>' : ''}<details class="friendly-disclosure"><summary>Fine-tune the opening</summary><div id="wizardAttachmentFields">${wizardAttachmentFields(wizard)}</div></details></section><aside data-wizard-live-preview aria-live="polite">${wizardLivePreviewMarkup(project)}</aside></div>`;
     }
   } else if (wizard.step === 3) {
     content = wizard.template === 'blank'
       ? `<p class="dialog-lede">We will add this as crisp, editable text. You can move, resize, recolor, or delete every line in 3D.</p><div class="tool-form"><label><span>Event name</span><input class="text-input" id="wizardEventName" maxlength="60" value="${escapeHtml(wizard.eventName)}" placeholder="City Night Run"></label><div class="dimension-grid"><label><span>Distance or award</span><input class="text-input" id="wizardDistance" maxlength="24" value="${escapeHtml(wizard.distance)}" placeholder="10 KM"></label><label><span>Date</span><input class="text-input" id="wizardEventDate" maxlength="30" value="${escapeHtml(wizard.eventDate)}" placeholder="18. 9. 2027"></label></div></div>`
       : `<div class="wizard-fixed-example"><b class="wizard-attachment-icon">✦</b><div><strong>This polished example already includes editable wording</strong><p class="dialog-lede">Open it, click any word directly on the medal, and type your own event name, distance, or date.</p></div></div>`;
   } else {
-    const project = wizardProject(wizard), info = GALLERY_TEMPLATE_INFO[wizard.template], attachment = ATTACHMENT_STYLE_INFO[project.medal.loopStyle];
-    const bodySize = project.medal.shape === 'circle' ? `${project.medal.diameter} mm` : `${project.medal.width} × ${project.medal.height} mm`;
-    content = `<div class="wizard-summary"><div class="wizard-medal-preview ${project.medal.shape}">${wizard.template === 'blank' ? 'YOUR DESIGN' : escapeHtml(info.preview)}</div><div><h3>${escapeHtml(project.name)}</h3><p class="dialog-lede">The design opens in the same rotatable 3D workspace. Add an object, move over the front or back face, and click only when its real preview is in the right place.</p><ul><li>${bodySize} ${escapeHtml(project.medal.shape)} body</li><li>${escapeHtml(attachment.label)} ribbon attachment</li><li>${project.paletteIds.length} local filament colors</li><li>${wizard.template === 'blank' ? `${project.elements.length} editable starter text items` : `${project.elements.length} editable example objects`}</li></ul></div></div>`;
+    const project = wizardProject(wizard), attachment = ATTACHMENT_STYLE_INFO[project.medal.loopStyle];
+    content = `<div class="wizard-summary"><div class="wizard-summary-geometry">${exactMedalPreview(project, { showDimensions: true })}</div><div><h3>${escapeHtml(project.name)}</h3><p class="dialog-lede">This is the same exact body and ribbon outline that opens in the rotatable 3D workspace. Add an object, move over the front or back face, and click only when its real preview is in the right place.</p><ul><li>${escapeHtml(medalSizeLabel(project))} ${escapeHtml(project.medal.shape)} body</li><li>${escapeHtml(medalOverallSizeLabel(project))}</li><li>${escapeHtml(attachment.label)} · ${escapeHtml(attachmentOpeningLabel(project))}</li><li>${project.paletteIds.length} local filament colors</li><li>${wizard.template === 'blank' ? `${project.elements.length} editable starter text items` : `${project.elements.length} editable example objects`}</li></ul></div></div>`;
   }
   const back = wizard.step > 0 ? '<button class="button secondary" type="button" id="wizardBack">Back</button>' : '<button class="button secondary" type="button" id="wizardCancel">Cancel</button>';
   const next = wizard.step < 4 ? '<button class="button primary" type="button" id="wizardNext">Continue</button>' : '<button class="button primary" type="button" id="wizardFinish">Open in 3D</button>';
   $('#dialogBody').innerHTML = `${progress}${content}<div class="dialog-actions">${back}${next}</div>`;
   $$('[data-wizard-template]').forEach(button => button.addEventListener('click', () => { wizard.template = button.dataset.wizardTemplate; $$('[data-wizard-template]').forEach(item => { const active = item === button; item.classList.toggle('active', active); item.setAttribute('aria-checked', String(active)); }); }));
-  $$('[data-wizard-shape]').forEach(button => button.addEventListener('click', () => { wizard.shape = button.dataset.wizardShape; $$('[data-wizard-shape]').forEach(item => { const active = item === button; item.classList.toggle('active', active); item.setAttribute('aria-checked', String(active)); }); }));
-  $('#wizardSize')?.addEventListener('input', event => { wizard.size = Number(event.target.value); $('#wizardSizeLabel').textContent = `${wizard.size} mm`; });
+  $$('[data-wizard-shape]').forEach(button => button.addEventListener('click', () => { wizard.shape = button.dataset.wizardShape; $$('[data-wizard-shape]').forEach(item => { const active = item === button; item.classList.toggle('active', active); item.setAttribute('aria-checked', String(active)); }); refreshWizardGeometryPreviews(); }));
+  $('#wizardSize')?.addEventListener('input', event => { wizard.size = Number(event.target.value); $('#wizardSizeLabel').textContent = `${wizard.size} mm`; refreshWizardGeometryPreviews({ shapes: true }); });
   $$('[data-wizard-attachment]').forEach(button => button.addEventListener('click', () => { wizard.attachment = button.dataset.wizardAttachment; renderNewDesignWizard(); }));
   $$('[data-wizard-ribbon]').forEach(button => button.addEventListener('click', () => {
     const width = Number(button.dataset.wizardRibbon);
@@ -4927,13 +5017,28 @@ function renderNewDesignWizard() {
   $('#wizardEventName')?.addEventListener('input', event => { wizard.eventName = event.target.value; });
   $('#wizardDistance')?.addEventListener('input', event => { wizard.distance = event.target.value; });
   $('#wizardEventDate')?.addEventListener('input', event => { wizard.eventDate = event.target.value; });
+  $$('[data-wizard-attachment-field]').forEach(input => input.addEventListener('input', () => {
+    const requested = Number(input.value);
+    if (!Number.isFinite(requested)) return;
+    wizard.attachmentSettings[input.dataset.wizardAttachmentField] = requested;
+    refreshWizardGeometryPreviews();
+  }));
   $$('[data-wizard-attachment-field]').forEach(input => input.addEventListener('change', () => {
     const minimum = Number(input.min), maximum = Number(input.max), requested = Number(input.value);
     const value = Math.max(Number.isFinite(minimum) ? minimum : requested, Math.min(Number.isFinite(maximum) ? maximum : requested, requested));
+    input.value = String(value);
     wizard.attachmentSettings[input.dataset.wizardAttachmentField] = value;
-    if (input.dataset.wizardAttachmentField === 'loopWidth') wizard.attachmentSettings.slotWidth = Math.min(wizard.attachmentSettings.slotWidth, value - 2);
-    if (input.dataset.wizardAttachmentField === 'loopHeight') wizard.attachmentSettings.slotHeight = Math.min(wizard.attachmentSettings.slotHeight, value - 2);
-    renderNewDesignWizard();
+    if (input.dataset.wizardAttachmentField === 'loopWidth') {
+      wizard.attachmentSettings.slotWidth = Math.min(wizard.attachmentSettings.slotWidth, value - 2);
+      const dependent = $('[data-wizard-attachment-field="slotWidth"]');
+      if (dependent) { dependent.max = String(value - 2); dependent.value = String(wizard.attachmentSettings.slotWidth); }
+    }
+    if (input.dataset.wizardAttachmentField === 'loopHeight') {
+      wizard.attachmentSettings.slotHeight = Math.min(wizard.attachmentSettings.slotHeight, value - 2);
+      const dependent = $('[data-wizard-attachment-field="slotHeight"]');
+      if (dependent) { dependent.max = String(value - 2); dependent.value = String(wizard.attachmentSettings.slotHeight); }
+    }
+    refreshWizardGeometryPreviews();
   }));
   $('#wizardCancel')?.addEventListener('click', closeDialog);
   $('#wizardBack')?.addEventListener('click', () => { wizard.step -= 1; renderNewDesignWizard(); });

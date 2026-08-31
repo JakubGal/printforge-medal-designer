@@ -38,6 +38,23 @@ test('beginner creation controls include safe text fitting and the expanded symb
   assert.doesNotMatch(app, /renderSelectionHud\(input\.dataset/);
 });
 
+test('new-medal setup shows exact live body and ribbon geometry instead of generic icons', async () => {
+  const [app, preview, styles] = await Promise.all([read('app.js'), read('medal-preview.js'), read('styles.css')]);
+  assert.doesNotMatch(app, /const attachmentIcons\s*=/);
+  assert.match(app, /wizardLivePreviewMarkup/);
+  assert.match(app, /data-wizard-live-preview/);
+  assert.match(app, /data-wizard-shape-preview/);
+  assert.match(app, /wizardAttachmentChoiceMarkup/);
+  assert.match(app, /fitInternalAttachmentToBody/);
+  for (const phrase of ['Live 2D preview', 'Finished footprint', 'Ribbon']) assert.match(app, new RegExp(phrase));
+  assert.match(preview, /medalAttachmentGeometry/);
+  assert.match(preview, /presetMedalOutlinePoints/);
+  assert.match(preview, /data-preview-attachment/);
+  assert.match(preview, /medalOverallSizeLabel/);
+  assert.match(styles, /\.medal-top-view/);
+  assert.match(styles, /\.wizard-live-preview/);
+});
+
 test('the hosted image flow does not render an unavailable generator as a disabled primary action', async () => {
   const app = await read('app.js');
   assert.match(app, /hostedStatic \? '' : '<button type="button" class="action-card" id="createImagePrimary"/);
@@ -61,9 +78,9 @@ test('plain-language operations replace the old visible CAD labels', async () =>
 
 test('cache-busted release assets and static hosting validation stay aligned', async () => {
   const [hub, studio] = await Promise.all([read('index.html'), read('workspaces/medals/index.html')]);
-  assert.match(hub, /release20/);
-  assert.match(studio, /styles\.css\?v=20260831-release20/);
-  assert.match(studio, /app\.js\?v=20260831-release20/);
+  assert.match(hub, /release22/);
+  assert.match(studio, /styles\.css\?v=20260831-release22/);
+  assert.match(studio, /app\.js\?v=20260831-release22/);
 });
 
 test('phone, touch, reduced-motion, and high-contrast contracts remain present', async () => {
@@ -88,7 +105,7 @@ test('project safety and export cancellation keep their asynchronous guarantees'
   assert.match(app, /abortController\?\.abort\(\)/);
   assert.match(app, /productionKinds\.has\(button\.dataset\.export\) && blocked/);
   assert.match(sync, /'shape-library\.js'/);
-  assert.match(sync, /20260831-release20/);
+  assert.match(sync, /20260831-release22/);
 });
 
 test('viewer and item controls expose unambiguous native controls', async () => {
