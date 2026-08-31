@@ -1,5 +1,5 @@
 import { loadRecord, saveRecord } from './storage.js';
-import { traceShapePath } from './shape-library.js';
+import { SHAPE_CATALOG, SHAPE_CATEGORIES, shapeInfo, shapeSvgMarkup, traceShapePath } from './shape-library.js';
 import {
   ASIA_FILAMENT_PRESETS,
   ATTACHMENT_STYLE_INFO,
@@ -1136,8 +1136,13 @@ function uploadPanel(embedded = false) {
 }
 
 function shapesPanel(embedded = false) {
-  const shapes = [['circle','●','Circle'],['square','■','Square'],['triangle','▲','Triangle'],['diamond','◆','Diamond'],['star','★','Star'],['hexagon','⬢','Hexagon'],['bolt','ϟ','Bolt'],['heart','♥','Heart'],['mountain','⌃','Mountain'],['flag','⚑','Finish flag'],['trophy','♜','Trophy'],['runner','➜','Runner']];
-  return `${embedded ? '' : panelHeading('Print-safe symbols', 'Add a symbol')}<label class="shape-size-control"><span>Starting size</span><div class="unit-input"><input id="newShapeSize" type="number" min="2" max="${DESIGN_LIMITS.shapeSizeMax}" step="0.5" value="12"><em>mm</em></div></label><div class="shape-grid">${shapes.map(([kind, icon, label]) => `<button class="shape-button" data-add-shape="${kind}"><b>${icon}</b><span>${label}</span></button>`).join('')}</div>${createColorPickerHtml()}<div class="create-surface-note"><strong>Choose a symbol, then click either side of the 3D medal.</strong><br/>The size stays editable with the square corner handles.</div>`;
+  const visibleShapes = SHAPE_CATALOG.filter(shape => shape.id !== 'runner');
+  const groups = SHAPE_CATEGORIES.map(category => {
+    const shapes = visibleShapes.filter(shape => shape.category === category);
+    if (!shapes.length) return '';
+    return `<section class="shape-library-group" aria-labelledby="shape-category-${category.toLowerCase().replace(/\s+/g, '-')}"><div class="shape-library-heading"><strong id="shape-category-${category.toLowerCase().replace(/\s+/g, '-')}">${escapeHtml(category)}</strong><span>${category === 'Runners' ? 'Smooth athlete silhouettes' : category === 'Mountains' ? 'Detailed landscape symbols' : category === 'Essentials' ? 'Simple building blocks' : 'Event accents'}</span></div><div class="shape-grid">${shapes.map(shape => `<button type="button" class="shape-button" data-add-shape="${shape.id}" aria-label="Add ${escapeHtml(shape.label)}" title="${escapeHtml(shape.description)}"><svg viewBox="-0.62 -0.62 1.24 1.24" aria-hidden="true" focusable="false"><g fill="currentColor">${shapeSvgMarkup(shape.id, 1)}</g></svg><span>${escapeHtml(shape.label)}</span></button>`).join('')}</div></section>`;
+  }).join('');
+  return `${embedded ? '' : panelHeading('Print-safe symbols', 'Add a symbol')}<label class="shape-size-control"><span>Starting size</span><div class="unit-input"><input id="newShapeSize" type="number" min="2" max="${DESIGN_LIMITS.shapeSizeMax}" step="0.5" value="12"><em>mm</em></div></label><div class="shape-library">${groups}</div>${createColorPickerHtml()}<div class="create-surface-note"><strong>Choose a symbol, then click either side of the 3D medal.</strong><br/>The symbol stays vector-smooth and editable with the square corner handles. Detailed runners work best at 24 mm or larger.</div>`;
 }
 
 function drawPanel(embedded = false) {
@@ -2238,7 +2243,7 @@ function bindToolPanel() {
   });
   $$('[data-add-shape]').forEach(button => button.addEventListener('click', () => {
     const kind = button.dataset.addShape;
-    const element = { id: uid('shape'), type: 'shape', name: `${kind[0].toUpperCase()}${kind.slice(1)}`, shape: kind, x: 0, y: 0, size: Math.max(2, Math.min(DESIGN_LIMITS.shapeSizeMax, Number($('#newShapeSize')?.value) || 12)), rotation: 0, color: Math.min(state.drawing.color, state.project.paletteIds.length - 1), hidden: false, ...operationDefaults() };
+    const element = { id: uid('shape'), type: 'shape', name: shapeInfo(kind).label, shape: kind, x: 0, y: 0, size: Math.max(2, Math.min(DESIGN_LIMITS.shapeSizeMax, Number($('#newShapeSize')?.value) || 12)), rotation: 0, color: Math.min(state.drawing.color, state.project.paletteIds.length - 1), hidden: false, ...operationDefaults() };
     queuePlacement(element, element.name.toLowerCase());
   }));
   $$('[data-attachment-style]').forEach(button => button.addEventListener('click', () => commit(project => {
@@ -3344,7 +3349,7 @@ function renderInspector() {
   if (element.type === 'text') {
     specific = `<label class="field-label">Wording · edit directly</label><input class="text-input" data-element-field="text" value="${escapeHtml(element.text)}" maxlength="80" ${disabled}/><div class="control-grid"><label><span>Size</span><div class="unit-input"><input data-element-field="fontSize" data-number type="number" min="1" max="${DESIGN_LIMITS.textSizeMax}" step="0.1" value="${element.fontSize}" ${disabled}/><em>mm</em></div></label><label><span>Weight</span><select class="select-input" data-element-field="weight" data-number ${disabled}><option value="700" ${element.weight === 700 ? 'selected' : ''}>Bold</option><option value="800" ${element.weight === 800 ? 'selected' : ''}>Extra bold</option><option value="900" ${element.weight === 900 ? 'selected' : ''}>Heavy</option></select></label><label><span>Style</span><select class="select-input" data-element-field="fontFamily" ${disabled}><option value="Arial" ${element.fontFamily === 'Arial' ? 'selected' : ''}>Clean</option><option value="Verdana" ${element.fontFamily === 'Verdana' ? 'selected' : ''}>Wide</option><option value="Georgia" ${element.fontFamily === 'Georgia' ? 'selected' : ''}>Classic serif</option></select></label></div>`;
   } else if (element.type === 'shape') {
-    specific = `<div class="control-grid"><label><span>Size</span><div class="unit-input"><input data-element-field="size" data-number type="number" min="1" max="${DESIGN_LIMITS.shapeSizeMax}" step="0.1" value="${element.size}" ${disabled}/><em>mm</em></div></label><label><span>Shape</span><input class="text-input" value="${escapeHtml(element.shape)}" disabled/></label></div>`;
+    specific = `<div class="control-grid"><label><span>Size</span><div class="unit-input"><input data-element-field="size" data-number type="number" min="1" max="${DESIGN_LIMITS.shapeSizeMax}" step="0.1" value="${element.size}" ${disabled}/><em>mm</em></div></label><label><span>Shape</span><input class="text-input" value="${escapeHtml(shapeInfo(element.shape).label)}" disabled/></label></div>`;
   } else if (element.type === 'image') {
     const palette = getPalette(state.project, state.inventory);
     const used = (element.usedSlots?.length ? element.usedSlots : element.maskUrls?.map((url, slot) => url ? slot : -1).filter(slot => slot >= 0) || []).filter(slot => palette[slot]);

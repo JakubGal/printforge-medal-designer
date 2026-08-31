@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 
 const root = process.cwd();
 const destination = join(root, 'public');
-const releaseTag = '20260831-release22';
+const releaseTag = '20260831-release23';
 const rootFiles = [
   'index.html',
   '404.html',

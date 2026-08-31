@@ -200,12 +200,18 @@ h3 { margin-bottom: 7px; font-size: 14px; }
 .action-card > span:last-child { display: flex; flex-direction: column; gap: 2px; }
 .action-card strong { font-size: 12px; }
 .action-card small { color: var(--muted); font-size: 9px; line-height: 1.35; }
-.shape-grid { margin-top: 17px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.shape-library { display: grid; gap: 18px; margin-top: 17px; }
+.shape-library-group { display: grid; gap: 8px; }
+.shape-library-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.shape-library-heading strong { color: var(--ink); font-size: 10px; letter-spacing: .02em; }
+.shape-library-heading span { color: var(--muted); font-size: 8px; text-align: right; }
+.shape-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .shape-size-control { display: grid; grid-template-columns: 1fr 110px; align-items: center; gap: 10px; margin-top: 14px; color: var(--muted); font-size: 10px; font-weight: 720; }
-.shape-button { min-height: 68px; border: 1px solid var(--line); border-radius: 12px; background: white; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 6px; cursor: pointer; }
-.shape-button:hover { border-color: var(--accent); color: var(--accent); }
-.shape-button b { font-size: 22px; line-height: 1; }
-.shape-button span { font-size: 9px; font-weight: 700; }
+.shape-button { min-width: 0; min-height: 82px; padding: 8px 5px 7px; border: 1px solid var(--line); border-radius: 12px; background: white; color: #27313a; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 6px; cursor: pointer; transition: border-color .16s ease, color .16s ease, background .16s ease, transform .16s ease; }
+.shape-button:hover { border-color: var(--accent); color: var(--accent); background: #f8faff; transform: translateY(-1px); }
+.shape-button:focus-visible { outline: 3px solid rgba(49,95,244,.2); outline-offset: 1px; border-color: var(--accent); }
+.shape-button svg { width: 38px; height: 38px; overflow: visible; flex: 0 0 auto; }
+.shape-button span { min-height: 20px; display: grid; place-items: center; font-size: 8.5px; line-height: 1.15; font-weight: 720; text-align: center; overflow-wrap: anywhere; }
 .draw-mode-grid { margin-top: 17px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
 .draw-mode { min-height: 59px; border: 1px solid var(--line); border-radius: 11px; background: white; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; cursor: pointer; }
 .draw-mode b { font-size: 18px; line-height: 1; }

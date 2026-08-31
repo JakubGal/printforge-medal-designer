@@ -29,9 +29,13 @@ test('the 3D workspace exposes camera and keyboard controls accessibly', async (
 });
 
 test('beginner creation controls include safe text fitting and the expanded symbol library', async () => {
-  const app = await read('app.js');
-  for (const phrase of ['Auto-fit long text', 'Starting position', 'Classic serif', 'Finish flag', 'Trophy', 'Runner']) assert.match(app, new RegExp(phrase));
+  const [app, shapes] = await Promise.all([read('app.js'), read('shape-library.js')]);
+  for (const phrase of ['Auto-fit long text', 'Starting position', 'Classic serif']) assert.match(app, new RegExp(phrase));
+  for (const phrase of ['Finish flag', 'Trophy', 'Male runner', 'Female runner', 'Sprinter', 'Trail runner', 'Alpine ridge', 'Mountain range', 'Snow summit', 'Layered range', 'Trail to summit', 'Mountain sunrise']) assert.match(shapes, new RegExp(phrase));
   assert.match(app, /newShapeSize/);
+  assert.match(app, /shapeSvgMarkup\(shape\.id, 1\)/);
+  assert.match(app, /shape-library-group/);
+  assert.doesNotMatch(app, /\['runner','➜'/);
   assert.match(app, /fitSelectedInsideMedal/);
   assert.match(app, /duplicateSelectedToOtherSide/);
   assert.match(app, /textInput\.blur\(\);/);
@@ -78,9 +82,9 @@ test('plain-language operations replace the old visible CAD labels', async () =>
 
 test('cache-busted release assets and static hosting validation stay aligned', async () => {
   const [hub, studio] = await Promise.all([read('index.html'), read('workspaces/medals/index.html')]);
-  assert.match(hub, /release22/);
-  assert.match(studio, /styles\.css\?v=20260831-release22/);
-  assert.match(studio, /app\.js\?v=20260831-release22/);
+  assert.match(hub, /release23/);
+  assert.match(studio, /styles\.css\?v=20260831-release23/);
+  assert.match(studio, /app\.js\?v=20260831-release23/);
 });
 
 test('phone, touch, reduced-motion, and high-contrast contracts remain present', async () => {
@@ -105,7 +109,7 @@ test('project safety and export cancellation keep their asynchronous guarantees'
   assert.match(app, /abortController\?\.abort\(\)/);
   assert.match(app, /productionKinds\.has\(button\.dataset\.export\) && blocked/);
   assert.match(sync, /'shape-library\.js'/);
-  assert.match(sync, /20260831-release22/);
+  assert.match(sync, /20260831-release23/);
 });
 
 test('viewer and item controls expose unambiguous native controls', async () => {

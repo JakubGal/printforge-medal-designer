@@ -8,6 +8,7 @@ import {
   normalizeProject,
   snapToLayer,
 } from './project-model.js';
+import { shapeMinimumFeatureRatio } from './shape-library.js';
 
 /**
  * A release gate for generated medal concepts.  The score is deliberately
@@ -414,7 +415,7 @@ function reinforceMinimumFeatures(project) {
       changed = true;
     } else if (element.type === 'shape') {
       const scale = Math.min(element.scaleX || 1, element.scaleY || 1);
-      const featureRatio = element.shape === 'star' || element.shape === 'bolt' ? .12 : .22;
+      const featureRatio = shapeMinimumFeatureRatio(element.shape);
       const requiredSize = robust / featureRatio / scale;
       if (element.size < requiredSize) {
         element.size = requiredSize;

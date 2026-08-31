@@ -1,3 +1,5 @@
+import { shapeMinimumFeatureRatio } from './shape-library.js';
+
 export const DEFAULT_INVENTORY = [
   { id: 'midnight-black', name: 'Midnight Black', brand: 'PolyTerra', material: 'PLA', color: '#202a2f', pricePerKg: 590, stockGrams: 4500, effect: 'Matte', density: 1.24, abrasive: false },
   { id: 'electric-blue', name: 'Electric Blue', brand: 'Prusament', material: 'PLA', color: '#4d8ee8', pricePerKg: 620, stockGrams: 3100, effect: 'Solid', density: 1.24, abrasive: false },
@@ -1319,7 +1321,7 @@ export function buildChecks(project, inventory) {
     const planarScale = Math.min(Math.max(.001, Number(element.scaleX) || 1), Math.max(.001, Number(element.scaleY) || 1));
     let minimumFeature = Number.POSITIVE_INFINITY;
     if (element.type === 'text') minimumFeature = element.fontSize * (element.weight >= 800 ? .16 : .11) * planarScale;
-    if (element.type === 'shape') minimumFeature = (element.shape === 'star' || element.shape === 'bolt' ? element.size * .12 : element.size * .22) * planarScale;
+    if (element.type === 'shape') minimumFeature = element.size * shapeMinimumFeatureRatio(element.shape) * planarScale;
     if (element.type === 'path') minimumFeature = element.closed ? Math.min(elementBounds(element).width, elementBounds(element).height) * .15 : element.strokeWidth * planarScale;
     if (element.type === 'image') minimumFeature = (element.minimumFeature || element.detailCell || (element.width / Math.max(1, element.pixelWidth || 1))) * planarScale;
     if (element.type === 'image' && !element.dataUrl && !element.maskUrls?.some(Boolean)) checks.push({ level: 'block', elementId: element.id, title: `${element.name} has no safe local image data`, message: 'Re-upload the artwork. Remote or unsafe image sources are not loaded by local projects.' });
