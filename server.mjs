@@ -57,6 +57,9 @@ const types = {
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
   '.svg': 'image/svg+xml',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.vtt': 'text/vtt; charset=utf-8',
   '.wasm': 'application/wasm',
 };
 
@@ -72,6 +75,7 @@ const contentSecurityPolicy = [
   "script-src 'self' 'wasm-unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
+  "media-src 'self'",
   "worker-src 'self' blob:",
   "connect-src 'self'",
   "object-src 'none'",
@@ -871,7 +875,7 @@ function staticCacheControl(file) {
   const extension = extname(file).toLocaleLowerCase('en-US');
   if (extension === '.html') return 'no-cache';
   if (extension === '.wasm') return 'public, max-age=86400, must-revalidate';
-  if (['.js', '.css', '.png', '.jpg', '.jpeg', '.webp', '.svg'].includes(extension)) return 'public, max-age=3600';
+  if (['.js', '.css', '.png', '.jpg', '.jpeg', '.webp', '.svg', '.mp4', '.webm', '.vtt'].includes(extension)) return 'public, max-age=3600';
   return 'no-store';
 }
 

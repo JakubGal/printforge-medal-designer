@@ -15,7 +15,7 @@
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:image" content="../../og.png" />
     <title>MedalForge — Printable medal designer</title>
-    <link rel="stylesheet" href="../../assets/medals/styles.css?v=20260831-release23" />
+    <link rel="stylesheet" href="../../assets/medals/styles.css?v=20260831-release24" />
   </head>
   <body>
     <div class="app-shell">
@@ -37,8 +37,8 @@
           <button class="button secondary settings-button" id="globalSettingsButton" type="button" aria-haspopup="dialog" aria-controls="globalSettingsDrawer" aria-expanded="false">
             <span aria-hidden="true">⚙</span><span id="settingsSummary">0.4 mm · 3 colors</span>
           </button>
-          <button class="button secondary compact-button" id="helpButton" type="button" aria-label="Open quick tour" title="Open quick tour">
-            <span class="help-label-full">Quick tour</span><span class="help-label-short" aria-hidden="true">?</span>
+          <button class="button secondary compact-button" id="helpButton" type="button" aria-label="Open quick guide videos" title="Open quick guide videos" aria-haspopup="dialog" aria-controls="appDialog">
+            <span class="help-label-full">Guides</span><span class="help-label-short" aria-hidden="true">?</span>
           </button>
           <button class="button secondary" id="saveButton"><span class="save-label-full">Save a copy</span><span class="save-label-short" aria-hidden="true">Save</span></button>
           <button class="button primary" id="exportButton"><span class="export-label-full">Check &amp; export</span><span class="export-label-short" aria-hidden="true">Export</span></button>
@@ -129,6 +129,7 @@
               <span class="eyebrow">Simple design guide</span>
               <strong>Finish your medal step by step</strong>
               <ol id="quickStartSteps"></ol>
+              <button class="quick-start-video" id="watchQuickGuide" type="button">▶ Watch 29-sec overview</button>
             </section>
             <div class="canvas-empty" id="canvasEmpty" hidden><strong>What would you like to add?</strong><span>Every item stays editable.</span><div class="canvas-empty-actions"><button type="button" data-empty-tool="text">Text</button><button type="button" data-empty-tool="upload">Image</button><button type="button" data-empty-tool="shapes">Symbol</button><button type="button" data-empty-tool="draw">Draw</button></div></div>
             <div class="model-loading" id="modelLoading" hidden><span class="spinner"></span><strong>Building the 3D medal…</strong><small id="modelLoadingText">Preparing the medal body</small></div>
@@ -247,6 +248,6 @@
     </dialog>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <output class="sr-only" id="a11yStatus" aria-live="polite"></output>
-    <script type="module" src="../../assets/medals/app.js?v=20260831-release23"></script>
+    <script type="module" src="../../assets/medals/app.js?v=20260831-release24"></script>
   </body>
 </html>

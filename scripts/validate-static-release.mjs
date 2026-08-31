@@ -43,7 +43,7 @@ async function assertModuleGraph(moduleFile) {
     assertInsideOutput(target, `${reference} from ${normalized} must not escape public/`);
     assert.equal(await exists(target), true, `${reference} from ${normalized} must exist`);
     if (target.endsWith('.js')) {
-      assert.match(reference, /\?v=20260831-release23$/u, `${reference} from ${normalized} must carry the current release cache key`);
+      assert.match(reference, /\?v=20260831-release24$/u, `${reference} from ${normalized} must carry the current release cache key`);
       await assertModuleGraph(target);
     }
   }
@@ -54,11 +54,13 @@ const medal = join(output, 'workspaces', 'medals', 'index.html');
 const notFound = join(output, '404.html');
 const wasm = join(output, 'assets', 'medals', 'cad-kernel', 'replicad_single.wasm');
 const shapeLibrary = join(output, 'assets', 'medals', 'shape-library.js');
+const guideLibrary = join(output, 'assets', 'medals', 'guide-library.js');
 
 assert.equal(await exists(hub), true, 'workspace hub must be emitted');
 assert.equal(await exists(medal), true, 'medal workspace must be emitted');
 assert.equal(await exists(notFound), true, 'a physical 404 page must disable Cloudflare SPA fallback');
 assert.equal(await exists(shapeLibrary), true, 'the canonical symbol library must be emitted');
+assert.equal(await exists(guideLibrary), true, 'the quick-guide catalog must be emitted');
 assert.match(await readFile(hub, 'utf8'), /PrintForge/u);
 assert.match(await readFile(medal, 'utf8'), /MedalForge/u);
 assert.match(await readFile(notFound, 'utf8'), /PrintForge · 404/u);
@@ -66,6 +68,17 @@ await assertLocalReferences(hub);
 await assertLocalReferences(medal);
 await assertModuleGraph(join(output, 'workspace-hub.js'));
 await assertModuleGraph(join(output, 'assets', 'medals', 'app.js'));
+const guideLibraryUrl = `${pathToFileURL(guideLibrary).href}?release=${Date.now()}`;
+const { GUIDE_LIBRARY } = await import(guideLibraryUrl);
+assert.equal(GUIDE_LIBRARY.length, 8, 'all eight quick guides must be present in the static release');
+for (const guide of GUIDE_LIBRARY) {
+  assert.ok(guide.durationSeconds > 0 && guide.durationSeconds < 30, `${guide.id} must be declared under 30 seconds`);
+  for (const field of ['video', 'poster', 'captions']) {
+    const asset = join(output, 'assets', 'medals', 'guides', guide[field]);
+    assert.equal(await exists(asset), true, `${guide.id} ${field} must be emitted`);
+    assert.ok((await stat(asset)).size > 20, `${guide.id} ${field} must not be empty`);
+  }
+}
 const registryUrl = `${pathToFileURL(join(output, 'workspace-registry.js')).href}?release=${Date.now()}`;
 const { WORKSPACES } = await import(registryUrl);
 for (const workspace of WORKSPACES.filter(item => item.status === 'ready')) {
@@ -88,6 +101,7 @@ assert.match(headers, /X-Content-Type-Options:\s*nosniff/u);
 assert.match(headers, /X-Frame-Options:\s*SAMEORIGIN/u);
 assert.match(headers, /^\/\s*[\s\S]*?Content-Security-Policy:/mu);
 assert.match(headers, /^\/workspaces\/medals\/\*\s*[\s\S]*?Content-Security-Policy:/mu);
+assert.match(headers, /media-src\s+'self'/u);
 assert.match(headers, /cad-step-worker\.js[\s\S]*unsafe-eval/u);
 assert.doesNotMatch(headers.split(/\r?\n\r?\n/u)[0], /Content-Security-Policy/u, 'the broad Cloudflare rule must not add a second CSP to the STEP worker');
 

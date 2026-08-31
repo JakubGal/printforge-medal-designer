@@ -48,8 +48,17 @@ ephemeral `?qa=` fixtures for repeatable interaction tests.
   same project and filament catalog on the same origin.
 - [ ] Example gallery opens, loads both-sided examples, and restores
   focus to the button that opened it.
-- [ ] Quick tour opens from its desktop label and mobile `?`, can be dismissed
-  and reopened, and its Medal/Add/operation/Layers actions open the stated tool.
+- [ ] Guides opens from its desktop label and mobile `?`; all eight chapters
+  load into one player, show a poster, play with controls, and expose English
+  captions plus written steps without autoplaying.
+- [ ] Every guide is shorter than 30 seconds and demonstrates the current live
+  labels and workflow rather than an obsolete or mocked interface.
+- [ ] Changing chapters pauses and resets the player; closing the dialog stops
+  and unloads media, then returns focus to the Guides button.
+- [ ] Restart interactive guide closes the video library and reopens the current
+  Medal/Add/operation/back/check/export step; Start a new medal opens the wizard.
+- [ ] The quick-start card's Watch overview action opens the first guide and the
+  library remains usable at 1440, 900, 560, 375, and 320 CSS pixels.
 - [ ] Dialogs and drawers trap keyboard focus, close with Escape, and return
   focus to their invoker.
 

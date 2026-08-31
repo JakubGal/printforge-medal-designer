@@ -77,6 +77,7 @@ download or ship an AI model. Use
 
 - Circle, oval, rounded, hexagon, shield, or hand-drawn/custom medal bodies with single, double, or no ribbon slot.
 - A guided clean start, one-click reset, and editable example gallery including the supplied photo-inspired medals with independent front and back object sets.
+- Eight captioned, sub-30-second Quick guides recorded from the real editor, with a single lightweight player, written steps, a complete-workflow overview, and a direct return to the interactive beginner guide.
 - One model-first CAD workspace with unrestricted underside orbit, exact front/back face placement, direct 3D object dragging, linked or free X/Y scale handles, a rotation handle, immediate planar-gesture commit, a live push/pull Z handle with numeric feedback and explicit OK/Cancel, exact layer inspection, and a transparent face-aligned sketch overlay for manual drawing.
 - One contextual Add shelf for editable text, PNG/JPEG/SVG/DXF artwork, shapes, and drawing; printer/material settings stay in a separate global defaults drawer.
 - Printable attachment presets for an external bar, double bar, internal round hole, closed slit, quick-load open slit, or no attachment, each with only its relevant dimensions.

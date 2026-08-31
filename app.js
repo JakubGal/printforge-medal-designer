@@ -60,6 +60,7 @@ import { OpenAiMedalProvider } from './openai-medal-provider.js';
 import { CURATED_EXAMPLE_INFO, createCuratedExample } from './curated-examples.js';
 import { RUNTIME_CONFIG, unavailableHostedCapability } from './runtime-config.js';
 import { attachmentOpeningLabel, medalOverallSizeLabel, medalSizeLabel, medalTopViewSvg } from './medal-preview.js';
+import { GUIDE_LIBRARY, guideAssetUrl, guideDurationLabel } from './guide-library.js';
 
 const QA_FIXTURE_ALIASES = Object.freeze({
   'final-premium-medal': 'showcase-night',
@@ -4757,6 +4758,125 @@ function closeDialog(){
   state.dialogReturnFocus = null;
 }
 
+function guideTranscriptMarkup(guide) {
+  return `<ol>${guide.transcript.map(line => `<li>${escapeHtml(line)}</li>`).join('')}</ol>`;
+}
+
+function guidePlayerMarkup(guide) {
+  return `<div class="guide-video-frame">
+    <video id="guideVideo" controls playsinline preload="metadata" poster="${escapeHtml(guideAssetUrl(guide.poster))}" aria-label="${escapeHtml(guide.title)} video guide" aria-describedby="guideOutcome guideMediaStatus">
+      <source id="guideVideoSource" src="${escapeHtml(guideAssetUrl(guide.video))}" type="video/mp4">
+      <track id="guideVideoCaptions" src="${escapeHtml(guideAssetUrl(guide.captions))}" kind="captions" srclang="en" label="English">
+      Your browser cannot play this guide. Use the written transcript below or restart the interactive guide.
+    </video>
+  </div>`;
+}
+
+function activateGuideChapter(guideId, { announce = true } = {}) {
+  const guide = GUIDE_LIBRARY.find(item => item.id === guideId) || GUIDE_LIBRARY[0];
+  const video = $('#guideVideo');
+  const source = $('#guideVideoSource');
+  const captions = $('#guideVideoCaptions');
+  if (!video || !source || !captions) return;
+
+  video.pause();
+  video.poster = guideAssetUrl(guide.poster);
+  video.setAttribute('aria-label', `${guide.title} video guide`);
+  source.src = guideAssetUrl(guide.video);
+  captions.src = guideAssetUrl(guide.captions);
+  $('#guideCurrentTitle').textContent = guide.title;
+  $('#guideOutcome').textContent = guide.outcome;
+  $('#guideDuration').textContent = guideDurationLabel(guide.durationSeconds);
+  $('#guideDuration').dateTime = `PT${guide.durationSeconds}S`;
+  $('#guideTranscript').innerHTML = guideTranscriptMarkup(guide);
+  const status = $('#guideMediaStatus');
+  if (status) status.textContent = announce ? `${guide.title} selected. Press play when you are ready.` : 'Press play when you are ready.';
+  $$('[data-guide-chapter]').forEach(button => {
+    const active = button.dataset.guideChapter === guide.id;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-current', active ? 'true' : 'false');
+    button.tabIndex = active ? 0 : -1;
+  });
+  video.load();
+}
+
+function openGuideLibrary(initialGuideId = 'overview') {
+  const initialGuide = GUIDE_LIBRARY.find(guide => guide.id === initialGuideId) || GUIDE_LIBRARY[0];
+  const chapters = GUIDE_LIBRARY.map((guide, index) => `<button type="button" class="guide-chapter ${guide.id === initialGuide.id ? 'active' : ''}" data-guide-chapter="${escapeHtml(guide.id)}" aria-current="${guide.id === initialGuide.id ? 'true' : 'false'}" tabindex="${guide.id === initialGuide.id ? '0' : '-1'}">
+    <span class="guide-chapter-number">${String(index + 1).padStart(2, '0')}</span>
+    <span><strong>${escapeHtml(guide.title)}</strong><small>${escapeHtml(guide.outcome)}</small></span>
+    <time datetime="PT${guide.durationSeconds}S">${guideDurationLabel(guide.durationSeconds)}</time>
+  </button>`).join('');
+
+  openDialog('Learn MedalForge', 'Quick guides', `<section class="guide-library" aria-label="Short MedalForge video guides">
+    <p class="dialog-lede guide-library-lede">Eight focused guides show the real editor, real buttons, and a complete printable-medal workflow. Every video is under 30 seconds and has English captions.</p>
+    <div class="guide-library-layout">
+      <nav class="guide-chapters" aria-label="Choose a guide chapter">${chapters}</nav>
+      <section class="guide-player" aria-labelledby="guideCurrentTitle">
+        ${guidePlayerMarkup(initialGuide)}
+        <div class="guide-player-copy" aria-live="polite">
+          <div class="guide-player-kicker"><span>Now showing</span><time id="guideDuration" datetime="PT${initialGuide.durationSeconds}S">${guideDurationLabel(initialGuide.durationSeconds)}</time></div>
+          <h3 id="guideCurrentTitle">${escapeHtml(initialGuide.title)}</h3>
+          <p id="guideOutcome">${escapeHtml(initialGuide.outcome)}</p>
+          <p class="guide-media-status" id="guideMediaStatus" role="status">Press play when you are ready.</p>
+          <details class="guide-transcript"><summary>Read the steps</summary><div id="guideTranscript">${guideTranscriptMarkup(initialGuide)}</div></details>
+        </div>
+      </section>
+    </div>
+    <div class="dialog-actions guide-library-actions">
+      <button class="button secondary" type="button" id="restartInteractiveGuide">Restart interactive guide</button>
+      <button class="button primary" type="button" id="guideStartNewMedal">Start a new medal</button>
+    </div>
+  </section>`);
+  dialog.classList.add('guide-library-dialog');
+
+  const video = $('#guideVideo');
+  const status = $('#guideMediaStatus');
+  const handleReady = () => {
+    if (!status || !Number.isFinite(video.duration)) return;
+    status.textContent = video.duration < 30
+      ? `Ready · ${guideDurationLabel(Math.round(video.duration))}`
+      : 'This guide is unavailable because it exceeds the 30-second guide limit.';
+  };
+  const handleError = () => {
+    if (status) status.textContent = 'The video could not load. You can still read the steps or restart the interactive guide.';
+  };
+  video.addEventListener('loadedmetadata', handleReady);
+  video.addEventListener('error', handleError);
+
+  const chapterButtons = $$('[data-guide-chapter]');
+  chapterButtons.forEach(button => button.addEventListener('click', () => activateGuideChapter(button.dataset.guideChapter)));
+  $('.guide-chapters')?.addEventListener('keydown', event => {
+    if (!['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const currentIndex = Math.max(0, chapterButtons.findIndex(button => button.getAttribute('aria-current') === 'true'));
+    const nextIndex = event.key === 'Home' ? 0
+      : event.key === 'End' ? chapterButtons.length - 1
+        : (currentIndex + (['ArrowDown', 'ArrowRight'].includes(event.key) ? 1 : -1) + chapterButtons.length) % chapterButtons.length;
+    chapterButtons[nextIndex].click();
+    chapterButtons[nextIndex].focus();
+  });
+  $('#restartInteractiveGuide')?.addEventListener('click', () => {
+    closeDialog();
+    restartOnboarding();
+    setView('3d');
+    renderOnboarding();
+    $('#quickStart')?.querySelector('[data-onboarding-action]')?.focus();
+  });
+  $('#guideStartNewMedal')?.addEventListener('click', () => { closeDialog(); openNewDesignWizard(); });
+
+  state.dialogCleanup = () => {
+    video.removeEventListener('loadedmetadata', handleReady);
+    video.removeEventListener('error', handleError);
+    video.pause();
+    video.removeAttribute('poster');
+    $('#guideVideoSource')?.removeAttribute('src');
+    $('#guideVideoCaptions')?.removeAttribute('src');
+    video.load();
+    dialog.classList.remove('guide-library-dialog');
+  };
+}
+
 function templatePreviewMarkup(key, info = GALLERY_TEMPLATE_INFO[key]) {
   return `<span class="template-preview ${escapeHtml(info.className || key)}" aria-hidden="true">${escapeHtml(info.preview || '＋')}</span>`;
 }
@@ -7284,7 +7404,8 @@ function bindStaticEvents() {
     event.preventDefault();
     activateOnboardingAction(Number(button.dataset.onboardingAction));
   });
-  $('#helpButton')?.addEventListener('click', () => { restartOnboarding(); setView('3d'); renderOnboarding(); });
+  $('#helpButton')?.addEventListener('click', () => openGuideLibrary());
+  $('#watchQuickGuide')?.addEventListener('click', () => openGuideLibrary('overview'));
   const quantityInput = $('#quantity');
   const updateQuantity = (normalize = false) => {
     const requested = Number(quantityInput.value);

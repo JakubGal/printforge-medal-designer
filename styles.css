@@ -870,6 +870,8 @@ dialog:has(.image-editor) { width: min(1080px, calc(100vw - 32px)); }
 .quick-start li.done i { color: white; background: var(--pass); }
 .quick-start-actions { display: flex; gap: 5px; }
 .quick-start li button { min-height: 32px; border: 0; border-radius: 7px; padding: 6px 8px; color: var(--accent); background: var(--accent-soft); font-size: 9px; font-weight: 760; cursor: pointer; }
+.quick-start-video { width: 100%; min-height: 36px; margin-top: 10px; border: 1px solid rgba(49,95,244,.18); border-radius: 9px; color: var(--accent); background: #f7f9ff; font-size: 10px; font-weight: 780; cursor: pointer; }
+.quick-start-video:hover { border-color: var(--accent); background: var(--accent-soft); }
 .model-loading { position: absolute; z-index: 6; display: flex; min-width: 210px; flex-direction: column; align-items: center; gap: 6px; padding: 18px; border-radius: 14px; background: rgba(255,255,255,.95); box-shadow: var(--shadow); }
 .model-loading strong { font-size: 12px; }
 .model-loading small { color: var(--muted); font-size: 9px; }
@@ -957,6 +959,35 @@ dialog::backdrop { background: rgba(20, 28, 24, .52); backdrop-filter: blur(4px)
 .dialog-lede { max-width: 640px; margin: 0 0 18px; color: var(--muted); font-size: 12px; line-height: 1.55; }
 .dialog-actions { margin-top: 20px; display: flex; justify-content: flex-end; gap: 9px; }
 .dialog-actions.compact { margin-top: 9px; }
+
+dialog.guide-library-dialog { width: min(1080px, calc(100vw - 32px)); }
+.guide-library-dialog .dialog-body { overflow-x: hidden; }
+.guide-library-lede { max-width: 760px; }
+.guide-library-layout { display: grid; grid-template-columns: minmax(250px, 310px) minmax(0, 1fr); gap: 18px; align-items: start; }
+.guide-chapters { display: grid; gap: 7px; max-height: min(570px, calc(100vh - 245px)); overflow-y: auto; padding: 2px 6px 2px 2px; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.guide-chapter { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 9px; align-items: center; width: 100%; min-height: 70px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); background: white; text-align: left; cursor: pointer; }
+.guide-chapter:hover { border-color: #aebdf2; background: #fafbff; }
+.guide-chapter.active { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.guide-chapter:focus-visible, .quick-start-video:focus-visible { outline: 3px solid rgba(49,95,244,.3); outline-offset: 2px; }
+.guide-chapter-number { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; color: var(--accent); background: white; font-size: 10px; font-weight: 850; letter-spacing: .06em; box-shadow: inset 0 0 0 1px rgba(49,95,244,.14); }
+.guide-chapter > span:nth-child(2) { min-width: 0; }
+.guide-chapter strong, .guide-chapter small { display: block; }
+.guide-chapter strong { font-size: 12px; line-height: 1.25; }
+.guide-chapter small { display: -webkit-box; overflow: hidden; margin-top: 3px; color: var(--muted); font-size: 10px; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.guide-chapter time { align-self: start; padding: 4px 6px; border-radius: 6px; color: #55605b; background: var(--surface-2); font-size: 10px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.guide-player { overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-2); box-shadow: 0 14px 36px rgba(29,35,32,.08); }
+.guide-video-frame { display: grid; min-height: 260px; place-items: center; overflow: hidden; background: #111714; }
+.guide-video-frame video { display: block; width: 100%; aspect-ratio: 16 / 9; max-height: min(55vh, 480px); object-fit: contain; background: #111714; }
+.guide-player-copy { padding: 15px 17px 17px; background: white; }
+.guide-player-kicker { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--accent); font-size: 8px; font-weight: 830; text-transform: uppercase; letter-spacing: .09em; }
+.guide-player-kicker time { padding: 4px 7px; border-radius: 999px; color: #4d5853; background: var(--surface-2); font-variant-numeric: tabular-nums; }
+.guide-player h3 { margin: 6px 0 4px; font-size: 18px; letter-spacing: -.025em; }
+.guide-player #guideOutcome { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.guide-media-status { min-height: 15px; margin: 8px 0 0; color: #68736e; font-size: 10.5px; }
+.guide-transcript { margin-top: 11px; border-top: 1px solid var(--line); }
+.guide-transcript summary { padding: 11px 0 2px; color: var(--accent); font-size: 10px; font-weight: 780; cursor: pointer; }
+.guide-transcript ol { display: grid; gap: 6px; margin: 9px 0 0; padding-left: 20px; color: #59635f; font-size: 10px; line-height: 1.45; }
+.guide-library-actions { position: sticky; bottom: -22px; z-index: 2; margin: 18px -22px -22px; padding: 14px 22px; border-top: 1px solid var(--line); background: rgba(255,255,255,.96); backdrop-filter: blur(12px); }
 .export-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 11px; }
 .export-card { border: 1px solid var(--line); border-radius: 14px; padding: 15px; background: white; text-align: left; cursor: pointer; }
 .export-card:hover { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(49,95,244,.07); }
@@ -1112,6 +1143,13 @@ dialog::backdrop { background: rgba(20, 28, 24, .52); backdrop-filter: blur(4px)
   .button.review { grid-column: 1 / -1; width: 100%; padding: 10px; }
   .price.total { padding-left: 10px; }
   .dialog-body { padding: 16px; }
+  dialog.guide-library-dialog { width: calc(100vw - 20px); }
+  .guide-library-layout { grid-template-columns: 1fr; gap: 13px; }
+  .guide-chapters { display: flex; max-height: none; margin-inline: -16px; padding: 2px 16px 7px; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x proximity; scrollbar-gutter: auto; }
+  .guide-chapter { flex: 0 0 min(280px, calc(100vw - 58px)); min-height: 66px; scroll-snap-align: center; }
+  .guide-video-frame { min-height: 0; }
+  .guide-video-frame video { max-height: 44svh; }
+  .guide-library-actions { bottom: -16px; margin: 16px -16px -16px; padding: 12px 16px; }
   .export-grid { grid-template-columns: 1fr; }
   .template-gallery-sheet { top: 138px; left: 10px; right: 10px; bottom: 122px; width: auto; max-height: none; padding: 18px; border-radius: 17px; overscroll-behavior: contain; scrollbar-gutter: stable; }
   .template-gallery-sheet > .global-settings-head { top: -18px; margin: -18px -18px 0; padding: 18px 18px 12px; }
@@ -1168,6 +1206,10 @@ dialog::backdrop { background: rgba(20, 28, 24, .52); backdrop-filter: blur(4px)
   .top-actions .button.primary { padding: 9px 11px; }
   .save-label-full, .export-label-full { display: none; }
   .save-label-short, .export-label-short { display: inline; }
+  .guide-player-copy { padding: 13px 14px 15px; }
+  .guide-player h3 { font-size: 16px; }
+  .guide-library-actions { display: grid; grid-template-columns: 1fr; }
+  .guide-library-actions .button { width: 100%; min-height: 44px; }
   .project-title { display: none; }
   .topbar { grid-template-columns: auto 1fr; }
   .top-actions { justify-self: end; }
@@ -1255,15 +1297,18 @@ dialog::backdrop { background: rgba(20, 28, 24, .52); backdrop-filter: blur(4px)
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
   .spinner { animation: none !important; border-top-color: currentColor; }
+  .guide-chapters { scroll-snap-type: none; }
 }
 
 @media (forced-colors: active) {
   .tool.active, .create-tool-tabs button.active, .color-button.active, .wizard-choice.active { outline: 3px solid Highlight; }
   .status-orb, .swatch, .filament-choice-swatch { forced-color-adjust: none; border: 2px solid CanvasText; }
   .viewer-toolbar, .selection-hud, .canvas-empty { border: 2px solid CanvasText; }
+  .guide-chapter.active, .guide-player { border: 2px solid Highlight; }
 }
 
 @media (pointer: coarse) {
   .viewer-toolbar button, .object-tree-actions button, .layer-actions button { min-width: 44px; min-height: 44px; }
+  .guide-chapter, .quick-start-video { min-height: 44px; }
   .transform-gizmo .transform-handle { stroke-width: 4px; }
 }

@@ -43,6 +43,7 @@ The generated `public/` directory contains:
 - local IndexedDB projects, filament inventory, preferences, and pricing;
 - printability checks and exact layer inspection;
 - client-side PNG, SVG, PDF, JSON, 3MF, STL, and STEP generation;
+- eight locally hosted, captioned Quick guide videos and WebP posters;
 - the lazy-loaded OpenCascade kernel needed for exact B-Rep/STEP export.
 
 The static release intentionally does **not** include:

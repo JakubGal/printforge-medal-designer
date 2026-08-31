@@ -82,9 +82,9 @@ test('plain-language operations replace the old visible CAD labels', async () =>
 
 test('cache-busted release assets and static hosting validation stay aligned', async () => {
   const [hub, studio] = await Promise.all([read('index.html'), read('workspaces/medals/index.html')]);
-  assert.match(hub, /release23/);
-  assert.match(studio, /styles\.css\?v=20260831-release23/);
-  assert.match(studio, /app\.js\?v=20260831-release23/);
+  assert.match(hub, /release24/);
+  assert.match(studio, /styles\.css\?v=20260831-release24/);
+  assert.match(studio, /app\.js\?v=20260831-release24/);
 });
 
 test('phone, touch, reduced-motion, and high-contrast contracts remain present', async () => {
@@ -109,7 +109,34 @@ test('project safety and export cancellation keep their asynchronous guarantees'
   assert.match(app, /abortController\?\.abort\(\)/);
   assert.match(app, /productionKinds\.has\(button\.dataset\.export\) && blocked/);
   assert.match(sync, /'shape-library\.js'/);
-  assert.match(sync, /20260831-release23/);
+  assert.match(sync, /'guide-library\.js'/);
+  assert.match(sync, /20260831-release24/);
+});
+
+test('quick video guides use one accessible captioned player and keep the interactive guide available', async () => {
+  const [studio, app, styles, headers, server] = await Promise.all([
+    read('workspaces/medals/index.html'),
+    read('app.js'),
+    read('styles.css'),
+    read('_headers'),
+    read('server.mjs'),
+  ]);
+  assert.match(studio, /id="helpButton"[^>]*aria-label="Open quick guide videos"/);
+  assert.match(studio, /<span class="help-label-full">Guides<\/span>/);
+  assert.match(studio, /id="watchQuickGuide"[^>]*>▶ Watch 29-sec overview<\/button>/);
+  assert.match(app, /function openGuideLibrary/);
+  assert.match(app, /<video id="guideVideo" controls playsinline preload="metadata"/);
+  assert.match(app, /kind="captions" srclang="en" label="English"/);
+  assert.doesNotMatch(app, /<video id="guideVideo"[^>]*autoplay/);
+  assert.match(app, /id="restartInteractiveGuide">Restart interactive guide/);
+  assert.match(app, /id="guideStartNewMedal">Start a new medal/);
+  assert.match(app, /video\.pause\(\)/);
+  assert.match(app, /removeAttribute\('src'\)/);
+  assert.match(styles, /\.guide-library-layout/);
+  assert.match(styles, /\.guide-video-frame video[^}]*aspect-ratio:\s*16\s*\/\s*9/);
+  assert.match(headers, /media-src 'self'/);
+  assert.match(server, /'\.mp4': 'video\/mp4'/);
+  assert.match(server, /'\.vtt': 'text\/vtt; charset=utf-8'/);
 });
 
 test('viewer and item controls expose unambiguous native controls', async () => {

@@ -1,0 +1,21 @@
+WEBVTT
+
+NOTE Turn an image into editable objects
+
+00:00:00.000 --> 00:00:04.000
+Open Image, then choose PNG, JPEG, SVG or DXF
+
+00:00:04.000 --> 00:00:09.000
+The medal face and colors are detected locally
+
+00:00:09.000 --> 00:00:13.000
+Select the parts you want to keep
+
+00:00:13.000 --> 00:00:17.000
+Set each part's color, surface and height
+
+00:00:17.000 --> 00:00:21.000
+Place all editable parts together
+
+00:00:21.000 --> 00:00:25.000
+Edit every extracted object later
