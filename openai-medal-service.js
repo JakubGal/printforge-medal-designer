@@ -14,7 +14,8 @@ const MAX_TIMEOUT_MS = 180_000;
 const MAX_BRIEF_LENGTH = 2_000;
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 const MAX_OUTPUT_TOKENS = 5_000;
-const REQUEST_FIELDS = new Set(['brief', 'nozzle', 'layerHeight', 'baseThickness', 'reliefHeight']);
+const REQUEST_FIELDS = new Set(['brief', 'locale', 'nozzle', 'layerHeight', 'baseThickness', 'reliefHeight']);
+const SUPPORTED_LOCALES = new Set(['en', 'sk', 'cs', 'de', 'pl']);
 const FILAMENT_IDS = [
   'midnight-black',
   'electric-blue',
@@ -184,14 +185,24 @@ function optionalNumber(source, key, allowedOrRange) {
   return value;
 }
 
+function optionalLocale(value) {
+  if (value === undefined || value === null || value === '') return undefined;
+  const requested = String(value).toLowerCase().split(/[-_]/u)[0];
+  const locale = requested === 'cz' ? 'cs' : requested;
+  if (!SUPPORTED_LOCALES.has(locale)) throw new OpenAiMedalServiceError(400, 'INVALID_LOCALE', 'Choose a supported application language.');
+  return locale;
+}
+
 export function validateOpenAiMedalInput(input) {
   if (!input || Array.isArray(input) || typeof input !== 'object') {
     throw new OpenAiMedalServiceError(400, 'INVALID_JSON', 'The medal request must be a JSON object.');
   }
   const unknown = Object.keys(input).filter(key => !REQUEST_FIELDS.has(key));
   if (unknown.length) throw new OpenAiMedalServiceError(400, 'UNKNOWN_FIELD', `Unsupported medal setting: ${unknown[0]}.`);
+  const locale = optionalLocale(input.locale);
   return {
     brief: normalizeBrief(input.brief),
+    ...(locale ? { locale } : {}),
     manufacturing: {
       nozzle: optionalNumber(input, 'nozzle', [0.2, 0.4, 0.6, 0.8]),
       layerHeight: optionalNumber(input, 'layerHeight', { min: 0.05, max: 0.5 }),
@@ -207,6 +218,7 @@ function medalInstructions() {
     'Convert the user\u2019s event brief into exactly four polished, materially different, professional medal directions.',
     'Return only the supplied MedalDesignPlan v1 JSON schema.',
     'Prefer concise, correctly spelled event text and intentional visual hierarchy.',
+    'Write event wording, direction labels and descriptions in the requested language and preserve native diacritics.',
     'Use a maximum of six available filament IDs. Role colors must be included in palette.ids.',
     'Every direction must be printable with the specified nozzle: use bold connected motifs, adequate negative space, no hairlines, no gradients, and no unsupported floating details.',
     'Keep the back flat. Choose practical sizes, ribbon attachments, rim treatments, and relief dimensions.',
@@ -219,9 +231,10 @@ function inputText(input) {
     .filter(([, value]) => value !== undefined)
     .map(([key, value]) => `${key}: ${value}`)
     .join(', ');
+  const language = input.locale ? `\nRequested language: ${input.locale}.` : '';
   return overrides
-    ? `Event and design brief:\n${input.brief}\n\nRequired manufacturing settings (copy these exactly): ${overrides}.`
-    : `Event and design brief:\n${input.brief}`;
+    ? `Event and design brief:\n${input.brief}${language}\n\nRequired manufacturing settings (copy these exactly): ${overrides}.`
+    : `Event and design brief:\n${input.brief}${language}`;
 }
 
 export function buildOpenAiMedalRequest(config, input) {

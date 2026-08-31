@@ -25,6 +25,10 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .hub-header nav { display: flex; align-items: center; gap: 28px; color: #435049; font-size: 13px; font-weight: 720; }
 .hub-header nav a:hover { color: var(--ink); }
 .hub-header .header-cta { padding: 11px 16px; border-radius: 10px; color: white; background: var(--ink); }
+.language-switcher { display: inline-flex; min-height: 40px; align-items: center; gap: 5px; padding: 0 7px 0 10px; border: 1px solid var(--line); border-radius: 11px; color: #4f5e57; background: rgba(255,255,255,.7); }
+.language-switcher > span { font-size: 13px; line-height: 1; }
+.language-switcher select { width: 40px; min-height: 36px; padding: 0 2px; border: 0; outline: 0; color: var(--ink); background: transparent; cursor: pointer; font-size: 10px; font-weight: 850; letter-spacing: .04em; }
+.language-switcher:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(47,98,243,.12); }
 
 main { overflow: hidden; }
 .hero { display: grid; grid-template-columns: minmax(0, 1.02fr) minmax(390px, .98fr); gap: clamp(40px, 7vw, 112px); max-width: 1460px; min-height: 680px; margin: 0 auto; padding: clamp(64px, 8vw, 118px) clamp(24px, 5vw, 80px) 84px; align-items: center; }
@@ -113,6 +117,10 @@ footer strong { color: var(--ink); } footer a { color: var(--accent); font-weigh
 @media (max-width: 650px) {
   .hub-header { min-height: 64px; padding: 0 16px; }
   .hub-header .header-cta { padding: 10px 12px; font-size: 11px; }
+  .hub-header nav { gap: 8px; }
+  .language-switcher { min-height: 38px; padding-inline: 5px; }
+  .language-switcher > span { display: none; }
+  .language-switcher select { width: 32px; min-height: 36px; text-align: center; }
   .hero { min-height: 0; gap: 42px; padding: 54px 18px 64px; }
   .hero h1 { font-size: clamp(42px, 14vw, 62px); }
   .hero-actions > a { width: 100%; }
@@ -127,6 +135,10 @@ footer strong { color: var(--ink); } footer a { color: var(--accent); font-weigh
   .workflow ol { grid-template-columns: 1fr; }
   .workflow li { min-height: 170px; }
   footer { align-items: flex-start; flex-direction: column; justify-content: center; padding-block: 24px; }
+}
+
+@media (max-width: 480px) {
+  .hub-brand > span:last-child { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

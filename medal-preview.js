@@ -10,6 +10,18 @@ const measure = value => {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 };
 
+function displayMeasure(value, options = {}) {
+  const rounded = Math.round((Number(value) || 0) * 10) / 10;
+  return typeof options.formatNumber === 'function' ? options.formatNumber(rounded) : measure(rounded);
+}
+
+function displayMessage(options, key, fallback, variables = {}) {
+  if (typeof options.formatMessage === 'function') return options.formatMessage(key, variables);
+  return fallback.replace(/\{([A-Za-z_][\w.-]*)\}/gu, (token, name) => (
+    Object.hasOwn(variables, name) ? String(variables[name]) : token
+  ));
+}
+
 const xml = value => String(value ?? '')
   .replaceAll('&', '&amp;')
   .replaceAll('<', '&lt;')
@@ -73,24 +85,24 @@ function attachmentMarkup(geometry) {
   return pieces.join('');
 }
 
-function dimensionMarkup(medal, width, height, bodyBottom, bodyRight) {
+function dimensionMarkup(medal, width, height, bodyBottom, bodyRight, options = {}) {
   if (medal.shape === 'circle') {
     const y = bodyBottom + 6;
-    return `<g class="medal-preview-dimensions" aria-hidden="true"><path d="M ${number(-width / 2)} ${number(bodyBottom + 1)} V ${number(y + 1)} M ${number(width / 2)} ${number(bodyBottom + 1)} V ${number(y + 1)} M ${number(-width / 2)} ${number(y)} H ${number(width / 2)}"/><path d="M ${number(-width / 2)} ${number(y)} l 2 -1.2 v 2.4 z M ${number(width / 2)} ${number(y)} l -2 -1.2 v 2.4 z"/><text x="0" y="${number(y + 4)}" text-anchor="middle">Ø ${measure(width)} mm</text></g>`;
+    return `<g class="medal-preview-dimensions" aria-hidden="true"><path d="M ${number(-width / 2)} ${number(bodyBottom + 1)} V ${number(y + 1)} M ${number(width / 2)} ${number(bodyBottom + 1)} V ${number(y + 1)} M ${number(-width / 2)} ${number(y)} H ${number(width / 2)}"/><path d="M ${number(-width / 2)} ${number(y)} l 2 -1.2 v 2.4 z M ${number(width / 2)} ${number(y)} l -2 -1.2 v 2.4 z"/><text x="0" y="${number(y + 4)}" text-anchor="middle">Ø ${displayMeasure(width, options)} mm</text></g>`;
   }
   const y = bodyBottom + 6;
   const x = bodyRight + 7;
-  return `<g class="medal-preview-dimensions" aria-hidden="true"><path d="M ${number(-width / 2)} ${number(bodyBottom + 1)} V ${number(y + 1)} M ${number(width / 2)} ${number(bodyBottom + 1)} V ${number(y + 1)} M ${number(-width / 2)} ${number(y)} H ${number(width / 2)}"/><path d="M ${number(-width / 2)} ${number(y)} l 2 -1.2 v 2.4 z M ${number(width / 2)} ${number(y)} l -2 -1.2 v 2.4 z"/><text x="0" y="${number(y + 4)}" text-anchor="middle">${measure(width)} mm</text><path d="M ${number(bodyRight + 1)} ${number(-height / 2)} H ${number(x + 1)} M ${number(bodyRight + 1)} ${number(height / 2)} H ${number(x + 1)} M ${number(x)} ${number(-height / 2)} V ${number(height / 2)}"/><path d="M ${number(x)} ${number(-height / 2)} l -1.2 2 h 2.4 z M ${number(x)} ${number(height / 2)} l -1.2 -2 h 2.4 z"/><text x="${number(x + 4)}" y="0" text-anchor="middle" transform="rotate(90 ${number(x + 4)} 0)">${measure(height)} mm</text></g>`;
+  return `<g class="medal-preview-dimensions" aria-hidden="true"><path d="M ${number(-width / 2)} ${number(bodyBottom + 1)} V ${number(y + 1)} M ${number(width / 2)} ${number(bodyBottom + 1)} V ${number(y + 1)} M ${number(-width / 2)} ${number(y)} H ${number(width / 2)}"/><path d="M ${number(-width / 2)} ${number(y)} l 2 -1.2 v 2.4 z M ${number(width / 2)} ${number(y)} l -2 -1.2 v 2.4 z"/><text x="0" y="${number(y + 4)}" text-anchor="middle">${displayMeasure(width, options)} mm</text><path d="M ${number(bodyRight + 1)} ${number(-height / 2)} H ${number(x + 1)} M ${number(bodyRight + 1)} ${number(height / 2)} H ${number(x + 1)} M ${number(x)} ${number(-height / 2)} V ${number(height / 2)}"/><path d="M ${number(x)} ${number(-height / 2)} l -1.2 2 h 2.4 z M ${number(x)} ${number(height / 2)} l -1.2 -2 h 2.4 z"/><text x="${number(x + 4)}" y="0" text-anchor="middle" transform="rotate(90 ${number(x + 4)} 0)">${displayMeasure(height, options)} mm</text></g>`;
 }
 
-export function medalSizeLabel(project) {
+export function medalSizeLabel(project, options = {}) {
   const medal = project?.medal || {};
   const bounds = faceBounds(medal);
   const width = bounds.maxX - bounds.minX, height = bounds.maxY - bounds.minY;
-  return medal.shape === 'circle' ? `Ø ${measure(width)} mm` : `${measure(width)} × ${measure(height)} mm`;
+  return medal.shape === 'circle' ? `Ø ${displayMeasure(width, options)} mm` : `${displayMeasure(width, options)} × ${displayMeasure(height, options)} mm`;
 }
 
-export function medalOverallSizeLabel(project) {
+export function medalOverallSizeLabel(project, options = {}) {
   const medal = project?.medal || {};
   const attachment = medalAttachmentGeometry(project);
   const bounds = faceBounds(medal);
@@ -98,15 +110,25 @@ export function medalOverallSizeLabel(project) {
   const maxX = Math.max(bounds.maxX, attachment.outer?.x1 ?? bounds.maxX);
   const minY = Math.min(bounds.minY, attachment.outer?.y0 ?? bounds.minY);
   const maxY = Math.max(bounds.maxY, attachment.outer?.y1 ?? bounds.maxY);
-  return `${measure(maxX - minX)} × ${measure(maxY - minY)} mm overall`;
+  const size = `${displayMeasure(maxX - minX, options)} × ${displayMeasure(maxY - minY, options)} mm`;
+  return displayMessage(options, 'overall', '{size} overall', { size });
 }
 
-export function attachmentOpeningLabel(project) {
+export function attachmentOpeningLabel(project, options = {}) {
   const medal = project?.medal || {};
-  if (medal.loopStyle === 'single' || medal.loopStyle === 'double') return `${measure(medal.slotWidth)} × ${measure(medal.slotHeight)} mm ribbon opening`;
-  if (medal.loopStyle === 'eyelet') return `Ø ${measure(medal.holeDiameter)} mm ribbon hole`;
-  if (medal.loopStyle === 'slit' || medal.loopStyle === 'open-slit') return `${measure(medal.slitWidth)} × ${measure(medal.slitHeight)} mm ribbon opening`;
-  return 'No ribbon opening';
+  if (medal.loopStyle === 'single' || medal.loopStyle === 'double') {
+    const size = `${displayMeasure(medal.slotWidth, options)} × ${displayMeasure(medal.slotHeight, options)} mm`;
+    return displayMessage(options, 'ribbonOpening', '{size} ribbon opening', { size });
+  }
+  if (medal.loopStyle === 'eyelet') {
+    const size = `Ø ${displayMeasure(medal.holeDiameter, options)} mm`;
+    return displayMessage(options, 'ribbonHole', '{size} ribbon hole', { size });
+  }
+  if (medal.loopStyle === 'slit' || medal.loopStyle === 'open-slit') {
+    const size = `${displayMeasure(medal.slitWidth, options)} × ${displayMeasure(medal.slitHeight, options)} mm`;
+    return displayMessage(options, 'ribbonOpening', '{size} ribbon opening', { size });
+  }
+  return displayMessage(options, 'noRibbonOpening', 'No ribbon opening');
 }
 
 /**
@@ -131,9 +153,9 @@ export function medalTopViewSvg(project, options = {}) {
   const minY = Math.min(bodyTop, attachmentTop) - pad;
   const maxY = bodyBottom + (showDimensions ? 13 : pad);
   const className = ['medal-top-view', compact ? 'is-compact' : '', options.className || ''].filter(Boolean).join(' ');
-  const label = options.label || `${medalSizeLabel(project)} ${medal.shape || 'circle'} medal, ${medalOverallSizeLabel(project)}, with ${attachment.style} ribbon attachment`;
+  const label = options.label || `${medalSizeLabel(project, options)} ${medal.shape || 'circle'} medal, ${medalOverallSizeLabel(project, options)}, with ${attachment.style} ribbon attachment`;
   const style = `--preview-body:${safeColor(options.bodyColor, '#20292d')};--preview-rim:${safeColor(options.rimColor, '#66716e')};--preview-attachment:${safeColor(options.attachmentColor, options.bodyColor || '#20292d')}`;
   const externalBeforeBody = attachment.outer ? roundedRect(attachment.outer, 'class="medal-preview-attachment" data-preview-attachment-outer="true" vector-effect="non-scaling-stroke"') : '';
   const openings = attachmentMarkup({ ...attachment, outer: null });
-  return `<svg xmlns="http://www.w3.org/2000/svg" class="${xml(className)}" viewBox="${number(minX)} ${number(minY)} ${number(maxX - minX)} ${number(maxY - minY)}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${xml(label)}" data-preview-shape="${xml(medal.shape || 'circle')}" data-preview-attachment="${xml(attachment.style)}" style="${xml(style)}"><title>${xml(label)}</title>${externalBeforeBody}${faceMarkup(medal)}${openings}${showDimensions ? dimensionMarkup(medal, width, height, bodyBottom, bodyRight) : ''}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" class="${xml(className)}" viewBox="${number(minX)} ${number(minY)} ${number(maxX - minX)} ${number(maxY - minY)}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${xml(label)}" data-preview-shape="${xml(medal.shape || 'circle')}" data-preview-attachment="${xml(attachment.style)}" style="${xml(style)}"><title>${xml(label)}</title>${externalBeforeBody}${faceMarkup(medal)}${openings}${showDimensions ? dimensionMarkup(medal, width, height, bodyBottom, bodyRight, options) : ''}</svg>`;
 }

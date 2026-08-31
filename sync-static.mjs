@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 
 const root = process.cwd();
 const destination = join(root, 'public');
-const releaseTag = '20260831-release24';
+const releaseTag = '20260831-release30';
 const rootFiles = [
   'index.html',
   '404.html',
@@ -11,6 +11,8 @@ const rootFiles = [
   'workspace-hub.css',
   'workspace-hub.js',
   'workspace-registry.js',
+  'localization.js',
+  'localization-runtime.js',
   'og.png',
   '.nojekyll',
   '_headers',
@@ -21,6 +23,8 @@ const workspaceFiles = [
 const medalFiles = [
   'styles.css',
   'app.js',
+  'localization.js',
+  'localization-runtime.js',
   'guide-library.js',
   'runtime-config.js',
   'cloud-image-provider.js',

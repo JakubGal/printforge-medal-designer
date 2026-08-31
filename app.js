@@ -61,6 +61,16 @@ import { CURATED_EXAMPLE_INFO, createCuratedExample } from './curated-examples.j
 import { RUNTIME_CONFIG, unavailableHostedCapability } from './runtime-config.js';
 import { attachmentOpeningLabel, medalOverallSizeLabel, medalSizeLabel, medalTopViewSvg } from './medal-preview.js';
 import { GUIDE_LIBRARY, guideAssetUrl, guideDurationLabel } from './guide-library.js';
+import {
+  LANGUAGE_CHANGE_EVENT,
+  formatLocalizedNumber,
+  getCurrentLocale,
+  getCurrentLocaleTag,
+  initializeLocalization,
+  localizeSubtree,
+  translateUi,
+  translateUiKey,
+} from './localization-runtime.js?v=20260831-release30';
 
 const QA_FIXTURE_ALIASES = Object.freeze({
   'final-premium-medal': 'showcase-night',
@@ -103,6 +113,7 @@ const canvas = $('#medalCanvas');
 const ctx = canvas.getContext('2d');
 const modelCanvas = $('#modelCanvas');
 const dialog = $('#appDialog');
+initializeLocalization({ context: 'studio' });
 const imageCache = new Map();
 const sliceCanvas = document.createElement('canvas');
 const MAX_ARTWORK_BYTES = 24 * 1024 * 1024;
@@ -233,7 +244,7 @@ const state = {
 
 function toast(message, options = {}) {
   const element = $('#toast');
-  element.textContent = message;
+  element.textContent = translateUi(message);
   element.classList.toggle('error', Boolean(options.error));
   element.classList.add('show');
   clearTimeout(state.toastTimer);
@@ -244,7 +255,7 @@ function announce(message) {
   const output = $('#a11yStatus');
   if (!output) return;
   output.textContent = '';
-  requestAnimationFrame(() => { output.textContent = message; });
+  requestAnimationFrame(() => { output.textContent = translateUi(message); });
 }
 
 function snapshot() { return JSON.stringify(state.project); }
@@ -538,8 +549,15 @@ function updateProjectionToggle(projection = 'perspective') {
   if (!button) return;
   const normalized = projection === 'orthographic' ? 'orthographic' : 'perspective';
   button.dataset.projection = normalized;
-  button.textContent = `View: ${normalized === 'orthographic' ? 'Orthographic' : 'Perspective'}`;
-  button.title = `Switch to ${normalized === 'orthographic' ? 'perspective' : 'orthographic'} view`;
+  button.textContent = translateUiKey(normalized === 'orthographic' ? 'camera.orthographic' : 'camera.perspective');
+  button.title = translateUiKey(normalized === 'orthographic' ? 'camera.switchPerspective' : 'camera.switchOrthographic');
+  button.setAttribute('aria-label', button.title);
+}
+
+function renderLocalizedWorkspaceChrome() {
+  $('#medalCanvas')?.setAttribute('aria-label', translateUiKey('accessibility.sketchCanvasDetailed'));
+  const shortcuts = $('#stageShortcuts');
+  if (shortcuts) shortcuts.innerHTML = `<kbd>Del</kbd> ${escapeHtml(translateUiKey('accessibility.shortcutDelete'))} · <kbd>[ ]</kbd> ${escapeHtml(translateUiKey('accessibility.shortcutHeight'))} · <kbd>Ctrl Z</kbd> ${escapeHtml(translateUiKey('accessibility.shortcutUndo'))} · ${escapeHtml(translateUiKey('accessibility.shortcutMove'))}`;
 }
 
 function setCameraPreset(preset, { speak = false, workspace = true } = {}) {
@@ -723,12 +741,71 @@ function operationValue(element) {
   return state.project.medal.baseThickness;
 }
 
+function localizedPluralMessage(keyBase, count, variables = {}) {
+  const numeric = Math.max(0, Number(count) || 0);
+  const category = new Intl.PluralRules(getCurrentLocaleTag()).select(numeric);
+  const suffix = category === 'one' ? 'One' : category === 'few' ? 'Few' : 'Many';
+  return translateUiKey(`${keyBase}${suffix}`, { ...variables, count: formatLocalizedNumber(numeric) });
+}
+
+function localizedCount(base, count) {
+  return localizedPluralMessage(`dynamicUi.${base}`, count);
+}
+
+function localizedFixed(value, digits = 2) {
+  return formatLocalizedNumber(value, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
+function localizedElementType(type) {
+  const key = { text: 'objectText', image: 'objectImage', shape: 'objectShape', path: 'objectPath' }[type];
+  return key ? translateUiKey(`dynamicUi.${key}`) : String(type || '');
+}
+
+function localizedOperationLabel(operation) {
+  const key = { raise: 'raised', engrave: 'recessed', inlay: 'flat', cut: 'throughHole' }[operation] || 'raised';
+  return translateUiKey(`text.${key}`);
+}
+
+function localizedAvailability(filament) {
+  const status = availability(filament);
+  return { ...status, label: translateUiKey(`stockStatusUi.${status.key}`) };
+}
+
+function localizedMedalShapeName(shape) {
+  const key = {
+    circle: 'circle', oval: 'oval', rounded: 'rounded', hexagon: 'hexagon', octagon: 'octagon',
+    scalloped: 'scalloped', star: 'star', gear: 'gear', shield: 'shield', custom: 'custom',
+  }[shape] || 'circle';
+  return translateUiKey(`galleryData.shapes.${key}`);
+}
+
+function localizedAttachmentName(style) {
+  const key = {
+    single: 'singleLabel', double: 'doubleLabel', eyelet: 'eyeletLabel', slit: 'slitLabel',
+    'open-slit': 'openSlitLabel', none: 'noneLabel',
+  }[style] || 'noneLabel';
+  return translateUiKey(`galleryData.attachment.${key}`);
+}
+
+function localizedPreviewOptions() {
+  return {
+    formatNumber: value => formatLocalizedNumber(value, { maximumFractionDigits: 1 }),
+    formatMessage: (key, variables) => translateUiKey(`wizardUi.${key}`, variables),
+  };
+}
+
+function localizedMedalSize(project) { return medalSizeLabel(project, localizedPreviewOptions()); }
+function localizedMedalOverallSize(project) { return medalOverallSizeLabel(project, localizedPreviewOptions()); }
+function localizedAttachmentOpening(project) { return attachmentOpeningLabel(project, localizedPreviewOptions()); }
+
 function layerCountLabel(value, layerHeight = state.project.profile.layerHeight) {
   const ratio = Math.max(0, Number(value) || 0) / Math.max(.01, Number(layerHeight) || .2);
   const nearest = Math.round(ratio);
-  if (Math.abs(ratio - nearest) <= .02) return `${nearest} layer${nearest === 1 ? '' : 's'}`;
+  if (Math.abs(ratio - nearest) <= .02) return localizedCount('layer', nearest);
   const readable = Number(ratio.toFixed(2));
-  return `≈ ${readable} layers`;
+  const category = new Intl.PluralRules(getCurrentLocaleTag()).select(readable);
+  const suffix = category === 'one' ? 'One' : category === 'few' ? 'Few' : 'Many';
+  return translateUiKey(`dynamicUi.approxLayer${suffix}`, { count: formatLocalizedNumber(readable, { maximumFractionDigits: 2 }) });
 }
 
 function snapProjectLayerHeights(project) {
@@ -746,12 +823,12 @@ function snapProjectLayerHeights(project) {
 }
 
 function operationDescription(element) {
-  if (element.face === 'back') return `Back · Flat color · ${element.zDepth.toFixed(2)} mm · ${layerCountLabel(element.zDepth)}`;
-  const info = OPERATION_INFO[element.operation] || OPERATION_INFO.raise;
-  const face = element.face === 'back' ? 'Back' : 'Front';
-  if (element.operation === 'cut') return `${face} · ${info.short} · full ${state.project.medal.baseThickness.toFixed(2)} mm`;
+  if (element.face === 'back') return `${translateUiKey('common.backSide')} · ${translateUiKey('text.flat')} · ${localizedFixed(element.zDepth)} mm · ${layerCountLabel(element.zDepth)}`;
+  const face = translateUiKey(element.face === 'back' ? 'common.backSide' : 'common.front');
+  const operation = localizedOperationLabel(element.operation);
+  if (element.operation === 'cut') return `${face} · ${operation} · ${translateUiKey('dynamicUi.full')} ${localizedFixed(state.project.medal.baseThickness)} mm`;
   const value = operationValue(element);
-  return `${face} · ${info.short} · ${value.toFixed(2)} mm · ${layerCountLabel(value)}`;
+  return `${face} · ${operation} · ${localizedFixed(value)} mm · ${layerCountLabel(value)}`;
 }
 
 function panelHeading(eyebrow, title) {
@@ -913,12 +990,15 @@ function closeFilamentChooser(restoreFocus = true) {
 }
 
 function filamentStockCard(filament, selectedId) {
-  const status = availability(filament);
+  const status = localizedAvailability(filament);
   const usedSlot = state.project.paletteIds.indexOf(filament.id);
   const disabled = status.key === 'out' && usedSlot < 0;
   const searchable = `${filament.name} ${filament.brand} ${filament.material} ${filament.effect}`.toLowerCase();
   const effect = filamentEffectChoice(filament.effect);
-  return `<label class="filament-choice-card ${filament.id === selectedId ? 'selected' : ''} ${disabled ? 'disabled' : ''}" data-stock-card data-searchable="${escapeHtml(searchable)}" data-material="${escapeHtml(filament.material)}"><input type="radio" name="stockFilament" value="${escapeHtml(filament.id)}" ${filament.id === selectedId ? 'checked' : ''} ${disabled ? 'disabled' : ''}><i class="filament-choice-swatch" style="background:${filament.color}"></i><span><strong>${escapeHtml(filament.name)}</strong><small>${escapeHtml(filament.material)} · ${escapeHtml(filament.effect)}</small><em><b>${effect.icon}</b>${usedSlot >= 0 ? `Color ${usedSlot + 1} in medal` : status.label} · Kč ${Number(filament.pricePerKg).toLocaleString('cs-CZ')}/kg</em></span></label>`;
+  const stockLabel = usedSlot >= 0
+    ? translateUiKey('stockStatusUi.colorInMedal', { count: formatLocalizedNumber(usedSlot + 1) })
+    : status.label;
+  return `<label class="filament-choice-card ${filament.id === selectedId ? 'selected' : ''} ${disabled ? 'disabled' : ''}" data-stock-card data-searchable="${escapeHtml(searchable)}" data-material="${escapeHtml(filament.material)}"><input type="radio" name="stockFilament" value="${escapeHtml(filament.id)}" ${filament.id === selectedId ? 'checked' : ''} ${disabled ? 'disabled' : ''}><i class="filament-choice-swatch" style="background:${filament.color}"></i><span><strong data-i18n-ignore>${escapeHtml(filament.name)}</strong><small data-i18n-ignore>${escapeHtml(filament.material)} · ${escapeHtml(filament.effect)}</small><em><b>${effect.icon}</b>${escapeHtml(stockLabel)} · Kč ${formatLocalizedNumber(filament.pricePerKg)}/kg</em></span></label>`;
 }
 
 function openFilamentChooser(context, anchor) {
@@ -1114,7 +1194,7 @@ function uploadPanel(embedded = false) {
       <div class="local-ai-title"><span class="eyebrow">${localMode ? 'Private · uses this computer' : 'Fast · provided by this app'}</span><span class="local-ai-badge ${badgeClass}" id="localAiBadge">${escapeHtml(badgeText)}</span></div>
       <strong>Create an image</strong>
       <p class="generator-intro">Describe what you want. We’ll create an image, then help you turn it into printable color layers.</p>
-      <label><span>What should be on the medal?</span><textarea class="text-input" id="localArtworkBrief" rows="4" placeholder="Example: a premium night-running medal with a dynamic runner, Prague skyline and a crescent moon">${escapeHtml(state.localArtworkBrief || '')}</textarea></label>
+      <label><span>What should be on the medal?</span><textarea class="text-input" id="localArtworkBrief" rows="4" data-i18n-ignore placeholder="${escapeHtml(translateUi('Example: a premium night-running medal with a dynamic runner, Prague skyline and a crescent moon'))}">${escapeHtml(state.localArtworkBrief || '')}</textarea></label>
       <details class="generator-options"><summary>Image options</summary><div class="cloud-generator-grid">
         <label><span>Look</span><select id="localArtworkStyle" class="select-input" aria-label="Generated image look"><option value="photo-medal" ${state.localArtworkStyle === 'photo-medal' ? 'selected' : ''}>Photorealistic medal concept</option><option value="photo-subject" ${state.localArtworkStyle === 'photo-subject' ? 'selected' : ''}>Photorealistic subject</option><option value="illustration" ${state.localArtworkStyle === 'illustration' ? 'selected' : ''}>Detailed illustration</option><option value="graphic" ${state.localArtworkStyle === 'graphic' ? 'selected' : ''}>Clean printable graphic</option><option value="silhouette" ${state.localArtworkStyle === 'silhouette' ? 'selected' : ''}>Bold silhouette</option></select></label>
         <label><span>Resolution</span><select id="localArtworkSize" class="select-input" aria-label="Generated image resolution"><option value="1024x1024" ${state.localArtworkSize === '1024x1024' ? 'selected' : ''}>1024 × 1024 · square</option><option value="1536x1024" ${state.localArtworkSize === '1536x1024' ? 'selected' : ''}>1536 × 1024 · landscape</option><option value="1024x1536" ${state.localArtworkSize === '1024x1536' ? 'selected' : ''}>1024 × 1536 · portrait</option></select></label>
@@ -1132,7 +1212,7 @@ function uploadPanel(embedded = false) {
       <b>↑</b><strong>Drop a file here, or choose one</strong><span>PNG, JPEG, SVG, or basic 2D DXF · up to 24 MB</span>
     </button>
     <div class="upload-note"><strong>Preview and clean every image before it touches the medal.</strong><br/>Crop it, remove only edge-connected background, choose a silhouette/outline/color effect, and limit its filament colors—all on this computer.</div>
-    <div class="image-color-card"><div class="image-color-head"><strong>Colors used for new images</strong><span class="image-color-head-actions">${inlineAddColorButtonHtml('upload')}<button type="button" id="uploadColorsButton">Manage</button></span></div><div class="image-color-list">${colors.map((filament, index) => `<span class="image-color-chip"><i style="background:${filament.color}"></i>${index + 1}. ${escapeHtml(filament.name)}</span>`).join('')}</div></div>
+    <div class="image-color-card"><div class="image-color-head"><strong>Colors used for new images</strong><span class="image-color-head-actions">${inlineAddColorButtonHtml('upload')}<button type="button" id="uploadColorsButton">Manage</button></span></div><div class="image-color-list">${colors.map((filament, index) => `<span class="image-color-chip" data-i18n-ignore><i style="background:${filament.color}"></i>${index + 1}. ${escapeHtml(filament.name)}</span>`).join('')}</div></div>
     `;
 }
 
@@ -1141,7 +1221,8 @@ function shapesPanel(embedded = false) {
   const groups = SHAPE_CATEGORIES.map(category => {
     const shapes = visibleShapes.filter(shape => shape.category === category);
     if (!shapes.length) return '';
-    return `<section class="shape-library-group" aria-labelledby="shape-category-${category.toLowerCase().replace(/\s+/g, '-')}"><div class="shape-library-heading"><strong id="shape-category-${category.toLowerCase().replace(/\s+/g, '-')}">${escapeHtml(category)}</strong><span>${category === 'Runners' ? 'Smooth athlete silhouettes' : category === 'Mountains' ? 'Detailed landscape symbols' : category === 'Essentials' ? 'Simple building blocks' : 'Event accents'}</span></div><div class="shape-grid">${shapes.map(shape => `<button type="button" class="shape-button" data-add-shape="${shape.id}" aria-label="Add ${escapeHtml(shape.label)}" title="${escapeHtml(shape.description)}"><svg viewBox="-0.62 -0.62 1.24 1.24" aria-hidden="true" focusable="false"><g fill="currentColor">${shapeSvgMarkup(shape.id, 1)}</g></svg><span>${escapeHtml(shape.label)}</span></button>`).join('')}</div></section>`;
+    const categoryLabel = category === 'Race day' ? translateUiKey('shapeCategoryUi.raceDay') : translateUi(category);
+    return `<section class="shape-library-group" aria-labelledby="shape-category-${category.toLowerCase().replace(/\s+/g, '-')}"><div class="shape-library-heading"><strong id="shape-category-${category.toLowerCase().replace(/\s+/g, '-')}">${escapeHtml(categoryLabel)}</strong><span>${category === 'Runners' ? 'Smooth athlete silhouettes' : category === 'Mountains' ? 'Detailed landscape symbols' : category === 'Essentials' ? 'Simple building blocks' : 'Event accents'}</span></div><div class="shape-grid">${shapes.map(shape => `<button type="button" class="shape-button" data-add-shape="${shape.id}" aria-label="Add ${escapeHtml(shape.label)}" title="${escapeHtml(shape.description)}"><svg viewBox="-0.62 -0.62 1.24 1.24" aria-hidden="true" focusable="false"><g fill="currentColor">${shapeSvgMarkup(shape.id, 1)}</g></svg><span>${escapeHtml(shape.label)}</span></button>`).join('')}</div></section>`;
   }).join('');
   return `${embedded ? '' : panelHeading('Print-safe symbols', 'Add a symbol')}<label class="shape-size-control"><span>Starting size</span><div class="unit-input"><input id="newShapeSize" type="number" min="2" max="${DESIGN_LIMITS.shapeSizeMax}" step="0.5" value="12"><em>mm</em></div></label><div class="shape-library">${groups}</div>${createColorPickerHtml()}<div class="create-surface-note"><strong>Choose a symbol, then click either side of the 3D medal.</strong><br/>The symbol stays vector-smooth and editable with the square corner handles. Detailed runners work best at 24 mm or larger.</div>`;
 }
@@ -1232,6 +1313,7 @@ function parseConceptBrief(brief) {
 function createLocalConcepts(brief) {
   try {
     const { concepts } = generateMedalConcepts(brief, {
+      locale: getCurrentLocale(),
       manufacturing: {
         nozzle: state.project.profile.nozzle,
         layerHeight: state.project.profile.layerHeight,
@@ -1353,7 +1435,7 @@ function conceptPreviewUrl(project) {
 }
 
 function conceptsFromPlan(plan, generation = {}) {
-  const { concepts } = generateMedalConcepts(plan);
+  const { concepts } = generateMedalConcepts(plan, { locale: getCurrentLocale() });
   return concepts
     .slice()
     .sort((first, second) => second.quality.score - first.quality.score)
@@ -1428,11 +1510,12 @@ async function generateConceptCandidates() {
   try {
     const useOpenAi = state.conceptGeneratorMode === 'openai' && state.conceptProviderStatus?.openai?.available;
     const result = useOpenAi
-      ? await openAiMedalPlanProvider().generate({ brief, ...manufacturing, signal: state.conceptAbortController.signal })
+      ? await openAiMedalPlanProvider().generate({ brief, locale: getCurrentLocale(), ...manufacturing, signal: state.conceptAbortController.signal })
       : !RUNTIME_CONFIG.sameOriginApi
-        ? { plan: parseMedalBrief(brief, { manufacturing }), metadata: { provider: 'deterministic-browser', enhanced: false, offline: true } }
+        ? { plan: parseMedalBrief(brief, { locale: getCurrentLocale(), manufacturing }), metadata: { provider: 'deterministic-browser', enhanced: false, offline: true } }
       : await localMedalPlanProvider().generate({
         brief,
+        locale: getCurrentLocale(),
         manufacturing,
         preferModel: true,
         signal: state.conceptAbortController.signal,
@@ -1466,6 +1549,7 @@ function ideasPanel(embedded = false) {
   const hostedStatic = RUNTIME_CONFIG.staticHosting;
   const parsed = parseConceptBrief(state.conceptBrief || 'running event');
   const planPreview = parseMedalBrief(state.conceptBrief || 'running event', {
+    locale: getCurrentLocale(),
     manufacturing: {
       nozzle: state.project.profile.nozzle,
       layerHeight: state.project.profile.layerHeight,
@@ -1488,7 +1572,7 @@ function ideasPanel(embedded = false) {
       ? Object.entries(quality.categories).sort(([, first], [, second]) => first.score - second.score)[0]
       : null;
     const weakestLabel = weakest ? `${weakest[0].replace(/([A-Z])/g, ' $1')} ${Number(weakest[1].score).toFixed(1)}` : '';
-    return `<button type="button" class="concept-card" data-use-concept="${index}">${preview ? `<img src="${escapeHtml(preview)}" alt="Front and back preview of ${escapeHtml(project.conceptMeta?.label || project.name)}" />` : `<span>${index + 1}</span>`}<span class="concept-rank">#${index + 1}</span><strong>${escapeHtml(project.conceptMeta?.label || project.name.split(' · ').at(-1))}${badge}</strong><small>${escapeHtml(project.conceptMeta?.description || `${project.elements.length} editable objects`)}<br>${project.elements.length} editable vector objects · flat printable back${weakestLabel ? ` · lowest check: ${escapeHtml(weakestLabel)}` : ''}</small></button>`;
+    return `<button type="button" class="concept-card" data-use-concept="${index}">${preview ? `<img src="${escapeHtml(preview)}" alt="Front and back preview of ${escapeHtml(project.conceptMeta?.label || project.name)}" />` : `<span>${index + 1}</span>`}<span class="concept-rank">#${index + 1}</span><strong><span data-i18n-ignore>${escapeHtml(project.conceptMeta?.label || project.name.split(' · ').at(-1))}</span>${badge}</strong><small><span data-i18n-ignore>${escapeHtml(project.conceptMeta?.description || `${project.elements.length} editable objects`)}</span><br>${project.elements.length} editable vector objects · flat printable back${weakestLabel ? ` · lowest check: ${escapeHtml(weakestLabel)}` : ''}</small></button>`;
   }).join('');
   const openAi = state.conceptProviderStatus?.openai;
   const openAiReady = Boolean(openAi?.available && openAi?.configured);
@@ -1501,7 +1585,7 @@ function ideasPanel(embedded = false) {
   const artworkActions = hostedStatic
     ? '<span>Copy a print-aware prompt for your preferred image tool, then import the result under Image.</span><button type="button" id="copyArtworkPrompt">Copy artwork prompt</button>'
     : '<span>Create only the visual subject, then convert it into separate printable color areas.</span><button type="button" id="ideasToImage">Create image…</button><button type="button" id="copyArtworkPrompt">Copy artwork prompt</button><button type="button" id="localAiInfo">How image creation works</button>';
-  return `${embedded ? '' : panelHeading('Describe it', 'Create a complete medal')}<div class="tool-form"><div class="concept-provider"><span>Runs free on this device</span>${openAiReady ? `<div class="concept-provider-options"><button type="button" data-concept-mode="local" class="${state.conceptGeneratorMode === 'local' ? 'active' : ''}" aria-pressed="${state.conceptGeneratorMode === 'local'}"><b>Free on this device</b><small>Private · always available</small></button><button type="button" data-concept-mode="openai" class="${state.conceptGeneratorMode === 'openai' ? 'active' : ''}" aria-pressed="${state.conceptGeneratorMode === 'openai'}"><b>Creative online service</b><small>Enabled by the site owner</small></button></div>` : ''}<small class="field-help">Describe the event in ordinary words. The app turns the idea into editable text, symbols, colors, edges, and a printable back.</small></div><label><span>What is the medal for?</span><textarea class="text-input concept-brief" id="conceptBrief" rows="5" ${state.conceptGenerationBusy ? 'disabled' : ''} placeholder="Example: Premium Prague night run, 10 km, 12 June 2027, elegant runners, moon and skyline">${escapeHtml(state.conceptBrief || '')}</textarea></label><button class="primary-wide" id="generateConcepts" ${state.conceptGenerationBusy ? 'disabled' : ''}>${state.conceptGenerationBusy ? 'Creating editable medal…' : 'Create 4 editable medal ideas'}</button>${state.conceptGenerationBusy ? '<button type="button" class="quiet-wide" id="cancelConceptGeneration">Cancel</button>' : ''}<small class="field-help">Your description is interpreted; it is never pasted as one long sentence on the medal.</small><div class="quality-gate"><strong><span>✓</span> Quality checked</strong><small>Wording · balance · spacing · focal art · palette · printability · smooth detail</small></div>${status}<details class="friendly-disclosure"><summary>See what the app understood</summary><div class="idea-parse-preview"><span>Editable text</span><strong>${escapeHtml(planPreview.event.title)} · ${escapeHtml(previewDistance)} · ${escapeHtml(previewDate)}</strong><span>Artwork subject</span><strong>${escapeHtml(parsed.visualSubject)}</strong></div></details>${bestAction}<div class="concept-results">${cards}</div><div class="ai-local-note"><strong>Want custom illustrated artwork?</strong>${artworkActions}</div></div>`;
+  return `${embedded ? '' : panelHeading('Describe it', 'Create a complete medal')}<div class="tool-form"><div class="concept-provider"><span>Runs free on this device</span>${openAiReady ? `<div class="concept-provider-options"><button type="button" data-concept-mode="local" class="${state.conceptGeneratorMode === 'local' ? 'active' : ''}" aria-pressed="${state.conceptGeneratorMode === 'local'}"><b>Free on this device</b><small>Private · always available</small></button><button type="button" data-concept-mode="openai" class="${state.conceptGeneratorMode === 'openai' ? 'active' : ''}" aria-pressed="${state.conceptGeneratorMode === 'openai'}"><b>Creative online service</b><small>Enabled by the site owner</small></button></div>` : ''}<small class="field-help">Describe the event in ordinary words. The app turns the idea into editable text, symbols, colors, edges, and a printable back.</small></div><label><span>What is the medal for?</span><textarea class="text-input concept-brief" id="conceptBrief" rows="5" data-i18n-ignore ${state.conceptGenerationBusy ? 'disabled' : ''} placeholder="${escapeHtml(translateUi('Example: Premium Prague night run, 10 km, 12 June 2027, elegant runners, moon and skyline'))}">${escapeHtml(state.conceptBrief || '')}</textarea></label><button class="primary-wide" id="generateConcepts" ${state.conceptGenerationBusy ? 'disabled' : ''}>${state.conceptGenerationBusy ? 'Creating editable medal…' : 'Create 4 editable medal ideas'}</button>${state.conceptGenerationBusy ? '<button type="button" class="quiet-wide" id="cancelConceptGeneration">Cancel</button>' : ''}<small class="field-help">Your description is interpreted; it is never pasted as one long sentence on the medal.</small><div class="quality-gate"><strong><span>✓</span> Quality checked</strong><small>Wording · balance · spacing · focal art · palette · printability · smooth detail</small></div>${status}<details class="friendly-disclosure"><summary>See what the app understood</summary><div class="idea-parse-preview"><span>Editable text</span><strong data-i18n-ignore>${escapeHtml(planPreview.event.title)} · ${escapeHtml(previewDistance)} · ${escapeHtml(previewDate)}</strong><span>Artwork subject</span><strong data-i18n-ignore>${escapeHtml(parsed.visualSubject)}</strong></div></details>${bestAction}<div class="concept-results">${cards}</div><div class="ai-local-note"><strong>Want custom illustrated artwork?</strong>${artworkActions}</div></div>`;
 }
 
 function createPanel() {
@@ -1533,7 +1617,8 @@ function medalThicknessMetrics() {
 
 function bodyLayerCountLabel(metrics) {
   const wholeLayers = Math.round(metrics.bodyLayers);
-  return Math.abs(metrics.bodyLayers - wholeLayers) < .04 ? `${wholeLayers} body layers` : `${metrics.bodyLayers.toFixed(1)} body layers`;
+  const count = Math.abs(metrics.bodyLayers - wholeLayers) < .04 ? wholeLayers : Math.round(metrics.bodyLayers * 10) / 10;
+  return localizedPluralMessage('medalSettingsUi.bodyLayer', count);
 }
 
 function updateMedalThicknessSummary() {
@@ -1542,7 +1627,7 @@ function updateMedalThicknessSummary() {
   const layers = $('#medalBodyLayerCount');
   const finished = $('#medalFinishedThickness');
   if (layers) layers.textContent = bodyLayerCountLabel(metrics);
-  if (finished) finished.textContent = `${metrics.finished.toFixed(2)} mm ${metrics.exact ? 'measured from model' : 'estimate'}`;
+  if (finished) finished.textContent = translateUiKey(metrics.exact ? 'medalSettingsUi.measuredFromModel' : 'medalSettingsUi.estimatedThickness', { height: localizedFixed(metrics.finished) });
   $$('#toolPanelContent [data-medal-thickness]').forEach(button => {
     const active = Math.abs(Number(button.dataset.medalThickness) - metrics.body) < .001;
     button.classList.toggle('active', active);
@@ -1557,11 +1642,15 @@ function exactMedalPreview(project, options = {}) {
   const rim = palette[Math.max(0, Math.min(palette.length - 1, Number(medal.rimColor) || 0))];
   const attachmentIndex = medal.attachmentColor === null || medal.attachmentColor === undefined ? Number(medal.baseColor) || 0 : Number(medal.attachmentColor) || 0;
   const attachment = palette[Math.max(0, Math.min(palette.length - 1, attachmentIndex))];
+  const attachmentName = localizedAttachmentName(medal.loopStyle);
+  const shapeName = localizedMedalShapeName(medal.shape);
   return medalTopViewSvg(project, {
+    ...localizedPreviewOptions(),
     bodyColor: body?.color,
     rimColor: rim?.color,
     attachmentColor: attachment?.color,
     ...options,
+    label: options.label || translateUiKey('wizardUi.exactTopView', { shape: shapeName, attachment: attachmentName }),
   });
 }
 
@@ -1612,7 +1701,7 @@ function medalPanel() {
     ['octagon','⯃','Octagon'],['scalloped','✿','Scalloped'],['star','★','Star'],['gear','⚙','Gear'],['shield','♢','Shield'],
   ];
   if (medal.outline?.length >= 3) outlines.push(['custom','✦','Custom']);
-  const ribbonPresets = medal.loopStyle === 'none' || medal.loopStyle === 'eyelet' ? '' : `<div class="ribbon-presets"><span>Ribbon fit</span><button type="button" data-ribbon-preset="22">22 mm</button><button type="button" data-ribbon-preset="25" class="recommended">25 mm standard</button><button type="button" data-ribbon-preset="38">38 mm wide</button></div><small class="field-help">Preset adds practical clearance; print and pull-test the final attachment with your actual ribbon.</small>`;
+  const ribbonPresets = medal.loopStyle === 'none' || medal.loopStyle === 'eyelet' ? '' : `<div class="ribbon-presets"><span>${escapeHtml(translateUiKey('medalSettingsUi.ribbonFit'))}</span><button type="button" data-ribbon-preset="22">22 mm</button><button type="button" data-ribbon-preset="25" class="recommended">${escapeHtml(translateUiKey('medalSettingsUi.standardRibbon', { width: '25' }))}</button><button type="button" data-ribbon-preset="38">${escapeHtml(translateUiKey('medalSettingsUi.wideRibbon', { width: '38' }))}</button></div><small class="field-help">${escapeHtml(translateUiKey('medalSettingsUi.presetClearance'))}</small>`;
   const attachmentFields = ['single', 'double'].includes(medal.loopStyle)
     ? `<div class="dimension-grid"><label>Bar width<input data-medal-field="loopWidth" type="number" min="12" max="60" step="0.5" value="${medal.loopWidth}" /></label><label>Bar height<input data-medal-field="loopHeight" type="number" min="5" max="18" step="0.5" value="${medal.loopHeight}" /></label><label>Opening width<input data-medal-field="slotWidth" type="number" min="6" max="55" step="0.5" value="${medal.slotWidth}" /></label><label>Opening height<input data-medal-field="slotHeight" type="number" min="2" max="16" step="0.2" value="${medal.slotHeight}" /></label></div>`
     : medal.loopStyle === 'eyelet'
@@ -1622,7 +1711,7 @@ function medalPanel() {
         : '<p class="panel-intro">The exported body will have no ribbon opening.</p>';
   const materialRole = (field, label, description) => {
     const selected = palette[Math.max(0, Math.min(palette.length - 1, Number(medal[field]) || 0))] || palette[0];
-    return `<section class="material-role-card"><div class="material-role-copy"><span>${escapeHtml(label)}</span><strong><i style="background:${selected?.color || '#777'}"></i>${escapeHtml(selected?.name || 'Material')}</strong><small>${escapeHtml(description)}</small></div><div class="material-role-swatches" role="radiogroup" aria-label="${escapeHtml(label)} color">${palette.map((filament, index) => `<button type="button" role="radio" aria-checked="${Number(medal[field]) === index}" class="${Number(medal[field]) === index ? 'active' : ''}" data-medal-color-field="${field}" data-medal-color-slot="${index}" title="${escapeHtml(filament.name)} · ${escapeHtml(filament.effect)}" aria-label="Color ${index + 1}: ${escapeHtml(filament.name)}"><i style="background:${filament.color}"></i><span>${index + 1}</span></button>`).join('')}${inlineAddColorButtonHtml(`medal:${field}`, { compact: true })}</div></section>`;
+    return `<section class="material-role-card"><div class="material-role-copy"><span>${escapeHtml(label)}</span><strong><i style="background:${selected?.color || '#777'}"></i><span data-i18n-ignore>${escapeHtml(selected?.name || 'Material')}</span></strong><small>${escapeHtml(description)}</small></div><div class="material-role-swatches" role="radiogroup" aria-label="${escapeHtml(label)} color">${palette.map((filament, index) => `<button type="button" role="radio" aria-checked="${Number(medal[field]) === index}" class="${Number(medal[field]) === index ? 'active' : ''}" data-medal-color-field="${field}" data-medal-color-slot="${index}" title="${escapeHtml(filament.name)} · ${escapeHtml(filament.effect)}" aria-label="Color ${index + 1}: ${escapeHtml(filament.name)}"><i style="background:${filament.color}"></i><span>${index + 1}</span></button>`).join('')}${inlineAddColorButtonHtml(`medal:${field}`, { compact: true })}</div></section>`;
   };
   const edgeStyles = `<button type="button" class="rim-style-card ${medal.rimWidth <= 0 ? 'active' : ''}" data-rim-style="none"><b>—</b><span>None</span><small>Flat edge</small></button>${Object.entries(RIM_STYLE_INFO).map(([key, info]) => `<button type="button" class="rim-style-card ${medal.rimWidth > 0 && medal.rimStyle === key ? 'active' : ''}" data-rim-style="${key}"><b>${info.icon}</b><span>${escapeHtml(info.label)}</span><small>${escapeHtml(info.description)}</small></button>`).join('')}`;
   return `${panelHeading('Medal basics', 'Body, edge & ribbon')}
@@ -1639,13 +1728,13 @@ function medalPanel() {
         <label class="unit-input" aria-label="Medal thickness in millimeters"><input id="medalThicknessInput" data-medal-thickness-input type="number" inputmode="decimal" min="1.2" max="${DESIGN_LIMITS.baseThicknessMax}" step="0.2" value="${medal.baseThickness}" /><em>mm</em></label>
       </div>
       <div class="medal-thickness-presets" aria-label="Common medal thicknesses">
-        ${[2, 2.4, 3, 4].map(value => `<button type="button" data-medal-thickness="${value}" class="${Math.abs(medal.baseThickness - value) < .001 ? 'active' : ''}" aria-pressed="${Math.abs(medal.baseThickness - value) < .001}">${value.toFixed(value % 1 ? 1 : 0)} mm</button>`).join('')}
+        ${[2, 2.4, 3, 4].map(value => `<button type="button" data-medal-thickness="${value}" class="${Math.abs(medal.baseThickness - value) < .001 ? 'active' : ''}" aria-pressed="${Math.abs(medal.baseThickness - value) < .001}">${formatLocalizedNumber(value, { maximumFractionDigits: 1 })} mm</button>`).join('')}
       </div>
-      <div class="medal-thickness-meta"><span><b id="medalBodyLayerCount">${bodyLayerCountLabel(thickness)}</b><small>at ${thickness.layerHeight.toFixed(2)} mm</small></span><span><b id="medalFinishedThickness">${thickness.finished.toFixed(2)} mm ${thickness.exact ? 'measured from model' : 'estimate'}</b><small>maximum with raised details</small></span></div>
+      <div class="medal-thickness-meta"><span><b id="medalBodyLayerCount">${bodyLayerCountLabel(thickness)}</b><small>${escapeHtml(translateUiKey('medalSettingsUi.atLayerHeight', { height: localizedFixed(thickness.layerHeight) }))}</small></span><span><b id="medalFinishedThickness">${escapeHtml(translateUiKey(thickness.exact ? 'medalSettingsUi.measuredFromModel' : 'medalSettingsUi.estimatedThickness', { height: localizedFixed(thickness.finished) }))}</b><small>${escapeHtml(translateUiKey('medalSettingsUi.maximumWithRaisedDetails'))}</small></span></div>
       <small>The body can be 1.2–${DESIGN_LIMITS.baseThicknessMax} mm thick. Raised artwork and the edge sit above it, so the finished maximum may be slightly thicker.</small>
     </section>
     <label class="field-label">Body & raised edge colors</label>
-    <div class="medal-material-roles">${materialRole('baseColor', 'Medal body', 'The complete base and ribbon attachment.')}${materialRole('rimColor', 'Raised edge', 'Independent printable color for the selected border.')}</div>
+    <div class="medal-material-roles">${materialRole('baseColor', 'Medal body', translateUiKey('medalSettingsUi.bodyDescription'))}${materialRole('rimColor', 'Raised edge', translateUiKey('medalSettingsUi.edgeDescription'))}</div>
     <label class="field-label">Raised edge style</label>
     <div class="rim-style-picker">${edgeStyles}</div>
     <details class="friendly-disclosure"><summary>Fine-tune edge size</summary><div class="dimension-grid edge-dimensions"><label>Edge width<input data-medal-field="rimWidth" type="number" min="0" max="${DESIGN_LIMITS.rimWidthMax}" step="0.1" value="${medal.rimWidth}" /></label><label>Edge height<input data-medal-field="rimHeight" type="number" min="0.1" max="${DESIGN_LIMITS.rimHeightMax}" step="${state.project.profile.layerHeight}" value="${medal.rimHeight}" /></label></div></details>
@@ -1654,7 +1743,7 @@ function medalPanel() {
     <div class="attachment-picker">${Object.entries(ATTACHMENT_STYLE_INFO).map(([key, info]) => attachmentChoiceMarkup(state.project, key, info)).join('')}</div>
     <div class="attachment-fields">${ribbonPresets}<details class="friendly-disclosure"><summary>Fine-tune ribbon opening</summary><div>${attachmentFields}</div></details></div>
     <details class="advanced-disclosure"><summary>Advanced construction settings</summary><div class="dimension-grid"><label>New-item height<input data-medal-field="defaultHeight" type="number" min="0.1" max="${DESIGN_LIMITS.reliefHeightMax}" step="${state.project.profile.layerHeight}" value="${medal.defaultHeight}" /></label><label>Minimum solid floor<input data-medal-field="minimumFloor" type="number" min="0.6" max="${Math.max(.6, medal.baseThickness - .2)}" step="0.1" value="${medal.minimumFloor}" /></label><label>Edge inset<input data-medal-field="edgeInset" type="number" min="0" max="5" step="0.1" value="${medal.edgeInset}" /></label></div></details>
-    <div class="upload-note"><strong>Every attachment is a real through-cut.</strong><br/>Exact layer preview and export use the same printable geometry shown in the model.</div>`;
+    <div class="upload-note"><strong>${escapeHtml(translateUiKey('medalSettingsUi.throughCut'))}</strong><br/>${escapeHtml(translateUiKey('medalSettingsUi.exactGeometryHelp'))}</div>`;
 }
 
 function layerPanel() {
@@ -1662,9 +1751,13 @@ function layerPanel() {
   const rows = [...state.project.elements].reverse().map(element => {
     const icon = element.type === 'text' ? 'T' : element.type === 'image' ? '▧' : element.type === 'path' ? '⌁' : '●';
     const info = OPERATION_INFO[element.operation] || OPERATION_INFO.raise;
-    const operationBadge = element.face === 'back' ? '◆ Flat color' : `${info.icon} ${escapeHtml(info.short)}`;
+    const operationBadge = element.face === 'back' ? `◆ ${escapeHtml(translateUiKey('text.flat'))}` : `${info.icon} ${escapeHtml(localizedOperationLabel(element.operation))}`;
+    const faceLabel = translateUiKey(element.face === 'back' ? 'common.backSide' : 'common.front');
+    const colorLabel = element.type === 'image'
+      ? localizedCount('color', imageUsedSlots(element, palette.length).length)
+      : `<span data-i18n-ignore>${escapeHtml(palette[element.color]?.name || `Color ${(element.color ?? 0) + 1}`)}</span>`;
     return `<div class="layer-row ${element.id === state.selectedId ? 'selected' : ''} ${element.hidden ? 'is-hidden' : ''}">
-      <button type="button" class="layer-select" data-layer-id="${escapeHtml(element.id)}" aria-label="Select ${escapeHtml(element.name)}"><span class="layer-thumb">${icon}</span><span class="layer-copy"><strong>${escapeHtml(element.name)}</strong><small><i class="operation-badge ${element.operation}">${operationBadge}</i> · ${element.face === 'back' ? 'Back' : 'Front'}${element.operation === 'cut' ? '' : ` · ${operationValue(element).toFixed(2)} mm`}${element.operation === 'cut' || element.operation === 'engrave' ? '' : ` · ${element.type === 'image' ? `${imageUsedSlots(element, palette.length).length} colors` : escapeHtml(palette[element.color]?.name || `Color ${(element.color ?? 0) + 1}`)}`}</small></span></button>
+      <button type="button" class="layer-select" data-layer-id="${escapeHtml(element.id)}" aria-label="Select ${escapeHtml(element.name)}"><span class="layer-thumb">${icon}</span><span class="layer-copy"><strong data-i18n-ignore>${escapeHtml(element.name)}</strong><small><i class="operation-badge ${element.operation}">${operationBadge}</i> · ${escapeHtml(faceLabel)}${element.operation === 'cut' ? '' : ` · ${localizedFixed(operationValue(element))} mm`}${element.operation === 'cut' || element.operation === 'engrave' ? '' : ` · ${colorLabel}`}</small></span></button>
       <span class="layer-actions">
         <button data-layer-move="up" data-layer-action-id="${escapeHtml(element.id)}" title="Place in front of overlapping items" aria-label="Move ${escapeHtml(element.name)} forward">↑</button>
         <button data-layer-move="down" data-layer-action-id="${escapeHtml(element.id)}" title="Place behind overlapping items" aria-label="Move ${escapeHtml(element.name)} backward">↓</button>
@@ -1710,7 +1803,7 @@ function queuePlacement(element, label = element.name, options = {}) {
   state.drawing.mode = 'select';
   setView('3d');
   $('#canvasWrap')?.classList.add('placing');
-  $('#placementGhostLabel').textContent = element.name || `Place ${label}`;
+  $('#placementGhostLabel').innerHTML = `<span data-i18n-ignore>${escapeHtml(element.name || `Place ${label}`)}</span>`;
   const bounds = elementBounds(element);
   $('#placementGhostSize').textContent = `${bounds.width.toFixed(1)} × ${bounds.height.toFixed(1)} mm`;
   $('#placementGhostFace').textContent = 'Front: normal relief · Back: flat first-layer color';
@@ -1723,7 +1816,7 @@ function queuePlacement(element, label = element.name, options = {}) {
   preview.style.width = `${initialWidth}px`;
   preview.style.height = `${Math.max(28, initialWidth * bounds.height / Math.max(.1, bounds.width))}px`;
   requestAnimationFrame(() => positionPlacementGhost(element, element.face === 'back' ? medalBottomZ() : medalTopZ()));
-  $('#stageHint').textContent = `Move over either face, then click to place ${label} · back placement is automatically flat · Escape cancels`;
+  $('#stageHint').textContent = translateUiKey('stage.placeEitherFace', { name: label });
   toast(fit.fitted ? `${label} auto-fitted to the printable face · click to place` : `Click the medal to place ${label}`);
 }
 
@@ -1828,12 +1921,12 @@ function updatePlacementPreview(event) {
     const fallbackWidth = Math.max(34, Math.min(230, bounds.width * 4));
     preview.style.width = `${fallbackWidth}px`; preview.style.height = `${Math.max(24, fallbackWidth * bounds.height / Math.max(.1, bounds.width))}px`;
   }
-  $('#placementGhostLabel').textContent = pending.element.name;
+  $('#placementGhostLabel').innerHTML = `<span data-i18n-ignore>${escapeHtml(pending.element.name)}</span>`;
   $('#placementGhostSize').textContent = `${bounds.width.toFixed(1)} × ${bounds.height.toFixed(1)} mm`;
   $('#placementGhostFace').textContent = !point ? 'Choose the front or back medal face' : pending.element.face === 'back' ? 'Back face · readable from back · flush first-layer color' : 'Front face · normal relief available';
   $('#stageHint').textContent = pending.valid
-    ? `${pending.element.face === 'back' ? 'Back face · flat for build-plate printing' : 'Front face'} · ${bounds.width.toFixed(1)} × ${bounds.height.toFixed(1)} mm · click to place`
-    : 'Move the full preview inside a flat medal face';
+    ? translateUiKey(pending.element.face === 'back' ? 'stage.placeBack' : 'stage.placeFront', { width: localizedFixed(bounds.width, 1), height: localizedFixed(bounds.height, 1) })
+    : translateUiKey('stage.insideFace');
   return pending.hit;
 }
 
@@ -2219,7 +2312,7 @@ function bindToolPanel() {
     state.conceptBrief = $('#conceptBrief')?.value.trim() || state.conceptBrief || 'running event';
     const prompt = printableArtworkPrompt(state.conceptBrief);
     try { await navigator.clipboard.writeText(prompt); toast('Print-constrained artwork prompt copied'); }
-    catch { openDialog('Printable artwork prompt', 'Copy this image prompt', `<textarea class="text-input" rows="9" readonly>${escapeHtml(prompt)}</textarea><div class="dialog-actions"><button class="button primary" data-close-dialog>Done</button></div>`); $('[data-close-dialog]')?.addEventListener('click', closeDialog); }
+    catch { openDialog('Printable artwork prompt', 'Copy this image prompt', `<textarea class="text-input" rows="9" data-i18n-ignore readonly>${escapeHtml(prompt)}</textarea><div class="dialog-actions"><button class="button primary" data-close-dialog>Done</button></div>`); $('[data-close-dialog]')?.addEventListener('click', closeDialog); }
   });
   $('#localAiInfo')?.addEventListener('click', () => {
     showImageGeneratorSetup();
@@ -2476,14 +2569,14 @@ function bindToolPanel() {
 
 function renderPalette() {
   const options = state.inventory.map(filament => {
-    const status = availability(filament);
-    return `<option value="${escapeHtml(filament.id)}" ${status.key === 'out' ? 'disabled' : ''}>${escapeHtml(filament.name)}${status.key !== 'available' ? ` — ${status.label}` : ''}</option>`;
+    const status = localizedAvailability(filament);
+    return `<option value="${escapeHtml(filament.id)}" ${status.key === 'out' ? 'disabled' : ''} data-i18n-ignore>${escapeHtml(filament.name)}${status.key !== 'available' ? ` — ${escapeHtml(status.label)}` : ''}</option>`;
   }).join('');
   $('#palette').innerHTML = state.project.paletteIds.map((id, index) => {
     const filament = state.inventory.find(item => item.id === id);
     if (!filament) return `<div class="palette-row out"><span class="slot-number">${index + 1}</span><span class="swatch" style="background:#d9dde0"></span><select class="palette-select" data-palette-slot="${index}" aria-label="Replace missing design color ${index + 1}"><option value="${escapeHtml(id)}" selected disabled>Missing: ${escapeHtml(id)}</option>${options}</select><span class="palette-meta">Choose a stocked replacement</span></div>`;
-    const status = availability(filament);
-    return `<div class="palette-row ${status.key === 'available' ? '' : status.key}"><span class="slot-number">${index + 1}</span><span class="swatch" style="background:${filament.color}"></span><select class="palette-select" data-palette-slot="${index}" aria-label="Design color ${index + 1}">${options.replace(`value="${escapeHtml(filament.id)}"`, `value="${escapeHtml(filament.id)}" selected`)}</select><button class="palette-info" type="button" data-filament-info="${escapeHtml(filament.id)}" title="Price, stock, and supplier">i</button><span class="palette-meta">${escapeHtml(filament.material)} · ${escapeHtml(filament.effect)} · Kč ${Number(filament.pricePerKg).toLocaleString('cs-CZ')}/kg · ${status.label}</span></div>`;
+    const status = localizedAvailability(filament);
+    return `<div class="palette-row ${status.key === 'available' ? '' : status.key}"><span class="slot-number">${index + 1}</span><span class="swatch" style="background:${filament.color}"></span><select class="palette-select" data-palette-slot="${index}" aria-label="Design color ${index + 1}">${options.replace(`value="${escapeHtml(filament.id)}"`, `value="${escapeHtml(filament.id)}" selected`)}</select><button class="palette-info" type="button" data-filament-info="${escapeHtml(filament.id)}" title="Price, stock, and supplier">i</button><span class="palette-meta"><span data-i18n-ignore>${escapeHtml(filament.material)} · ${escapeHtml(filament.effect)}</span> · Kč ${formatLocalizedNumber(filament.pricePerKg)}/kg · ${escapeHtml(status.label)}</span></div>`;
   }).join('');
   $$('[data-palette-slot]').forEach(select => select.addEventListener('change', () => {
     const slot = Number(select.dataset.paletteSlot);
@@ -2501,11 +2594,11 @@ function renderPalette() {
 
 function showFilamentInfo(id) {
   const filament = state.inventory.find(item => item.id === id); if (!filament) return;
-  const status = availability(filament);
+  const status = localizedAvailability(filament);
   const source = filament.productUrl
     ? `<a class="source-link" href="${escapeHtml(filament.productUrl)}" target="_blank" rel="noopener noreferrer">Open supplier reference ↗</a><small>Reference price ${filament.sourcePrice ? `${filament.sourcePrice} ${escapeHtml(filament.sourceCurrency)}` : 'not entered'}${filament.priceUpdatedAt ? ` · checked ${escapeHtml(filament.priceUpdatedAt)}` : ''}. Your Kč/kg and stock remain editable local values.</small>`
     : '<small>No supplier reference saved. Add one later to the local filament catalog.</small>';
-  openDialog('Filament details', `${filament.brand} · ${filament.name}`, `<div class="filament-detail"><span class="filament-detail-swatch" style="background:${filament.color}"></span><dl><div><dt>Local price</dt><dd>Kč ${Number(filament.pricePerKg).toLocaleString('cs-CZ')} / kg</dd></div><div><dt>Stock</dt><dd>${escapeHtml(status.label)}${filament.stockKnown === false ? '' : ` · ${Number(filament.stockGrams).toLocaleString('cs-CZ')} g`}</dd></div><div><dt>Material</dt><dd>${escapeHtml(filament.material)} · ${escapeHtml(filament.effect)}</dd></div><div><dt>Supplier</dt><dd>${escapeHtml(filament.supplierRegion || 'Local catalog')}</dd></div></dl></div><div class="supplier-reference">${source}</div><div class="dialog-actions"><button class="button secondary" id="openStockFromInfo">Edit stock & price</button><button class="button primary" data-close-dialog>Done</button></div>`);
+  openDialog('Filament details', `${filament.brand} · ${filament.name}`, `<div class="filament-detail"><span class="filament-detail-swatch" style="background:${filament.color}"></span><dl><div><dt>Local price</dt><dd>Kč ${formatLocalizedNumber(filament.pricePerKg)} / kg</dd></div><div><dt>Stock</dt><dd>${escapeHtml(status.label)}${filament.stockKnown === false ? '' : ` · ${formatLocalizedNumber(filament.stockGrams)} g`}</dd></div><div><dt>Material</dt><dd>${escapeHtml(filament.material)} · ${escapeHtml(filament.effect)}</dd></div><div><dt>Supplier</dt><dd>${escapeHtml(filament.supplierRegion || 'Local catalog')}</dd></div></dl></div><div class="supplier-reference">${source}</div><div class="dialog-actions"><button class="button secondary" id="openStockFromInfo">Edit stock & price</button><button class="button primary" data-close-dialog>Done</button></div>`);
   $('[data-close-dialog]')?.addEventListener('click', closeDialog);
   $('#openStockFromInfo')?.addEventListener('click', showInventoryDialog);
 }
@@ -2662,10 +2755,10 @@ function applySignedSurfaceAmount(element, signed, fillPocket = state.pocketFill
 
 function gizmoDescription(element) {
   const layer = state.project.profile.layerHeight;
-  if (element.operation === 'cut') return `−${state.project.medal.baseThickness.toFixed(2)} mm · cut through`;
-  if (element.operation === 'raise') return `+${element.zHeight.toFixed(2)} mm · ${Math.round(element.zHeight / layer)} layers · ${element.layerSnap ? 'snap' : 'free'}`;
+  if (element.operation === 'cut') return `−${localizedFixed(state.project.medal.baseThickness)} mm · ${translateUiKey('dynamicUi.cutThrough')}`;
+  if (element.operation === 'raise') return `+${localizedFixed(element.zHeight)} mm · ${layerCountLabel(element.zHeight, layer)} · ${translateUiKey(element.layerSnap ? 'dynamicUi.snap' : 'dynamicUi.free')}`;
   const floor = Math.max(0, state.project.medal.baseThickness - element.zDepth);
-  return `−${element.zDepth.toFixed(2)} mm · floor ${floor.toFixed(2)} mm${element.operation === 'inlay' ? ' · filled' : ''} · ${element.layerSnap ? 'snap' : 'free'}`;
+  return `−${localizedFixed(element.zDepth)} mm · ${translateUiKey('dynamicUi.floor')} ${localizedFixed(floor)} mm${element.operation === 'inlay' ? ` · ${translateUiKey('dynamicUi.filled')}` : ''} · ${translateUiKey(element.layerSnap ? 'dynamicUi.snap' : 'dynamicUi.free')}`;
 }
 
 function proxyAppearance(element, opacity = .38) {
@@ -2847,7 +2940,7 @@ function renderTransformGizmo() {
   $('#transformRotateStem').setAttribute('x1', top.x); $('#transformRotateStem').setAttribute('y1', top.y); $('#transformRotateStem').setAttribute('x2', rotate.x); $('#transformRotateStem').setAttribute('y2', rotate.y);
   root.toggleAttribute('hidden', false);
   label.hidden = false; label.style.left = `${points[2].x}px`; label.style.top = `${points[2].y}px`;
-  label.textContent = `${frame.width.toFixed(1)} × ${frame.height.toFixed(1)} mm${element.lockAspect !== false ? ' · linked' : ' · free'}`;
+  label.textContent = `${localizedFixed(frame.width, 1)} × ${localizedFixed(frame.height, 1)} mm · ${translateUiKey(element.lockAspect !== false ? 'dynamicUi.linked' : 'dynamicUi.free')}`;
 }
 
 function pointInElementTransformSpace(element, point) {
@@ -3096,7 +3189,7 @@ function renderSelectionHud() {
     : element.face === 'back'
       ? '<button type="button" data-move-on-face>Show edit handles</button><i>✓ Flat back color</i>'
       : '<button type="button" data-move-on-face>Show edit handles</button><button type="button" data-quick-operation="raise">Raised</button><button type="button" data-quick-operation="engrave">Recessed</button><button type="button" data-quick-operation="inlay">Flat color</button><button type="button" data-quick-operation="cut">Hole</button>';
-  root.innerHTML = `${directTextEditor}<div class="selection-hud-title"><span class="selection-hud-copy"><small>Selected · ${escapeHtml(element.type)}</small><strong>${escapeHtml(element.name)}</strong><em>${escapeHtml(operationDescription(element))}</em></span><span class="selection-hud-buttons">${editButtons}<button type="button" data-open-inspector>Details</button></span></div>`;
+  root.innerHTML = `${directTextEditor}<div class="selection-hud-title"><span class="selection-hud-copy"><small>${escapeHtml(translateUiKey('dynamicUi.selected'))} · ${escapeHtml(localizedElementType(element.type))}</small><strong data-i18n-ignore>${escapeHtml(element.name)}</strong><em>${escapeHtml(operationDescription(element))}</em></span><span class="selection-hud-buttons">${editButtons}<button type="button" data-open-inspector>Details</button></span></div>`;
   const textInput = root.querySelector('[data-inline-text-editor]');
   if (textInput) {
     const elementId = element.id;
@@ -3145,7 +3238,10 @@ function renderSelectionHud() {
     state.viewer?.fit();
     renderTransformGizmo();
     renderPushPullGizmo();
-    $('#stageHint').textContent = `Drag ${element.name} itself to move · square handles scale · round handle rotates · ${element.lockAspect === false ? 'free X/Y scaling' : 'aspect ratio locked'}`;
+    $('#stageHint').textContent = translateUiKey('stage.moveElement', {
+      name: element.name,
+      scaleMode: translateUiKey(element.lockAspect === false ? 'stage.scaleFree' : 'stage.scaleLocked'),
+    });
     requestAnimationFrame(() => $('#transformMoveHandle')?.focus());
   });
   root.querySelectorAll('[data-quick-operation]').forEach(button => button.addEventListener('click', () => commit(project => {
@@ -3167,10 +3263,10 @@ function renderSelectionHud() {
 function objectTreeRow(element) {
   const icon = element.type === 'text' ? 'T' : element.type === 'image' ? '▧' : element.type === 'path' ? '⌁' : '●';
   const info = OPERATION_INFO[element.operation] || OPERATION_INFO.raise;
-  const amount = element.operation === 'cut' ? 'through' : `${operationValue(element).toFixed(2)} mm`;
-  const operation = element.face === 'back' ? '◆ Flat color' : `${info.icon} ${escapeHtml(info.short)}`;
+  const amount = element.operation === 'cut' ? translateUiKey('dynamicUi.through') : `${localizedFixed(operationValue(element))} mm`;
+  const operation = element.face === 'back' ? `◆ ${escapeHtml(translateUiKey('text.flat'))}` : `${info.icon} ${escapeHtml(localizedOperationLabel(element.operation))}`;
   return `<div class="object-tree-row ${element.id === state.selectedId ? 'selected' : ''} ${element.hidden ? 'hidden-object' : ''}">
-    <button class="object-tree-select" type="button" data-object-tree-id="${escapeHtml(element.id)}" aria-label="Edit ${escapeHtml(element.name)}" aria-pressed="${element.id === state.selectedId}"><span class="object-tree-icon">${icon}</span><span class="object-tree-copy"><strong>${escapeHtml(element.name)}</strong><small>${operation} · ${amount}</small></span></button>
+    <button class="object-tree-select" type="button" data-object-tree-id="${escapeHtml(element.id)}" aria-label="Edit ${escapeHtml(element.name)}" aria-pressed="${element.id === state.selectedId}"><span class="object-tree-icon">${icon}</span><span class="object-tree-copy"><strong data-i18n-ignore>${escapeHtml(element.name)}</strong><small>${operation} · ${amount}</small></span></button>
     <span class="object-tree-actions"><button type="button" data-tree-lock="${escapeHtml(element.id)}" title="${element.locked ? 'Unlock' : 'Lock'}" aria-label="${element.locked ? 'Unlock' : 'Lock'} ${escapeHtml(element.name)}" aria-pressed="${element.locked}">${element.locked ? '▣' : '▢'}</button><button type="button" data-tree-hide="${escapeHtml(element.id)}" title="${element.hidden ? 'Show' : 'Hide'}" aria-label="${element.hidden ? 'Show' : 'Hide'} ${escapeHtml(element.name)}">${element.hidden ? '○' : '●'}</button></span>
   </div>`;
 }
@@ -3255,14 +3351,15 @@ function renderObjectTree() {
     const grouped = new Set();
     const groups = state.project.groups.map(group => {
       const members = elements.filter(element => element.groupId === group.id);
-      if (!members.length) return face === 'front' ? `<details class="object-group"><summary><span>▾ ${escapeHtml(group.name)}</span><small>0 items</small></summary><div class="object-group-items"><button type="button" data-rename-group="${escapeHtml(group.id)}">Rename empty group</button><div class="object-tree-empty">Empty group</div></div></details>` : '';
+      if (!members.length) return face === 'front' ? `<details class="object-group"><summary><span>▾ <span data-i18n-ignore>${escapeHtml(group.name)}</span></span><small>${escapeHtml(localizedCount('item', 0))}</small></summary><div class="object-group-items"><button type="button" data-rename-group="${escapeHtml(group.id)}">Rename empty group</button><div class="object-tree-empty">Empty group</div></div></details>` : '';
       members.forEach(element => grouped.add(element.id));
       const allLocked = members.every(element => element.locked), allHidden = members.every(element => element.hidden);
       const groupData = `data-group-id="${escapeHtml(group.id)}" data-group-face="${face}"`;
-      return `<details class="object-group" open><summary><span>▾ ${escapeHtml(group.name)}</span><small>${members.length} items</small></summary><div class="object-group-items"><div class="object-group-toolbar"><button type="button" data-rename-group="${escapeHtml(group.id)}" title="Rename group">Rename</button><button type="button" data-group-transform ${groupData} title="Move, resize, or rotate the group">Arrange</button><button type="button" data-group-duplicate ${groupData} title="Duplicate group">Copy</button><button type="button" data-group-lock ${groupData} title="${allLocked ? 'Unlock all' : 'Lock all'}">${allLocked ? 'Unlock' : 'Lock'}</button><button type="button" data-group-hide ${groupData} title="${allHidden ? 'Show all' : 'Hide all'}">${allHidden ? 'Show' : 'Hide'}</button></div>${[...members].reverse().map(objectTreeRow).join('')}</div></details>`;
+      return `<details class="object-group" open><summary><span>▾ <span data-i18n-ignore>${escapeHtml(group.name)}</span></span><small>${escapeHtml(localizedCount('item', members.length))}</small></summary><div class="object-group-items"><div class="object-group-toolbar"><button type="button" data-rename-group="${escapeHtml(group.id)}" title="Rename group">Rename</button><button type="button" data-group-transform ${groupData} title="Move, resize, or rotate the group">Arrange</button><button type="button" data-group-duplicate ${groupData} title="Duplicate group">Copy</button><button type="button" data-group-lock ${groupData} title="${allLocked ? 'Unlock all' : 'Lock all'}">${allLocked ? 'Unlock' : 'Lock'}</button><button type="button" data-group-hide ${groupData} title="${allHidden ? 'Show all' : 'Hide all'}">${allHidden ? 'Show' : 'Hide'}</button></div>${[...members].reverse().map(objectTreeRow).join('')}</div></details>`;
     }).join('');
     const ungrouped = [...elements].reverse().filter(element => !grouped.has(element.id));
-    return `<details class="object-face" open data-tree-face="${face}"><summary><span>${face === 'back' ? '↺ Back side · always flat' : '◎ Front side'}</span><small>${elements.length} item${elements.length === 1 ? '' : 's'}</small></summary><div class="object-face-body">${groups}${ungrouped.map(objectTreeRow).join('') || (!groups ? '<div class="object-tree-empty">No design items on this side</div>' : '')}</div></details>`;
+    const faceLabel = face === 'back' ? translateUiKey('dynamicUi.backAlwaysFlat') : translateUiKey('items.frontGroup');
+    return `<details class="object-face" open data-tree-face="${face}"><summary><span>${face === 'back' ? '↺' : '◎'} ${escapeHtml(faceLabel)}</span><small>${escapeHtml(localizedCount('item', elements.length))}</small></summary><div class="object-face-body">${groups}${ungrouped.map(objectTreeRow).join('') || (!groups ? '<div class="object-tree-empty">No design items on this side</div>' : '')}</div></details>`;
   };
   root.className = 'object-tree';
   root.innerHTML = `${renderFace('front')}${renderFace('back')}`;
@@ -3361,8 +3458,8 @@ function renderInspector() {
   }
   const showColor = !['engrave', 'cut'].includes(element.operation);
   const bounds = elementBounds(element);
-  const transformControls = `<div class="transform-size-card"><div class="transform-size-head"><strong>Size on medal</strong><button type="button" class="aspect-toggle ${element.lockAspect !== false ? 'active' : ''}" data-aspect-toggle ${disabled}>${element.lockAspect !== false ? '🔗 Ratio locked' : '⛓ Free width / height'}</button></div><div class="control-grid"><label><span>Width</span><div class="unit-input"><input data-element-dimension="width" type="number" min="0.5" max="${DESIGN_LIMITS.imageSizeMax}" step="0.1" value="${bounds.width.toFixed(1)}" ${disabled}/><em>mm</em></div></label><label><span>Height</span><div class="unit-input"><input data-element-dimension="height" type="number" min="0.5" max="${DESIGN_LIMITS.imageSizeMax}" step="0.1" value="${bounds.height.toFixed(1)}" ${disabled}/><em>mm</em></div></label></div><div class="scale-presets"><button type="button" data-scale-preset="0.8" ${disabled}>80%</button><button type="button" data-scale-preset="1" ${disabled}>Reset</button><button type="button" data-scale-preset="1.2" ${disabled}>120%</button></div><label class="field-label">Placed on</label><div class="segmented"><button type="button" data-element-face="front" class="${element.face !== 'back' ? 'active' : ''}" ${disabled}>Front</button><button type="button" data-element-face="back" class="${element.face === 'back' ? 'active' : ''}" ${disabled}>Back · flat</button></div>${element.face === 'back' ? '<p class="check-summary">✓ Added color is embedded into the back surface, so the medal stays flat on the build plate.</p>' : ''}<label class="field-label">Design group</label><select class="select-input" data-element-group ${disabled}><option value="">No group</option>${state.project.groups.map(group => `<option value="${escapeHtml(group.id)}" ${element.groupId === group.id ? 'selected' : ''}>${escapeHtml(group.name)}</option>`).join('')}</select></div>`;
-  root.innerHTML = `<div class="inspector-header"><div><span class="eyebrow">Selection · ${escapeHtml(element.type)}</span><h2>${escapeHtml(element.name)}</h2></div><span class="inspector-head-actions"><button class="icon-button" id="duplicateElement" title="Duplicate" aria-label="Duplicate ${escapeHtml(element.name)}" ${disabled}>＋</button><button class="icon-button inspector-mobile-close" id="closeInspector" aria-label="Close details">×</button></span></div>${surfaceControlsHtml(element)}${state.liveEdit ? '<div class="operation-note"><b>Live edit pending</b><span>Use OK or Cancel on the model before changing object properties.</span></div>' : ''}<div class="inspector-subsection"><span class="eyebrow">Object details</span>${specific}${transformControls}<div class="control-grid"><label><span>X position</span><div class="unit-input"><input data-element-field="x" data-number type="number" step="0.1" value="${element.x.toFixed(1)}" ${disabled}/><em>mm</em></div></label><label><span>Y position</span><div class="unit-input"><input data-element-field="y" data-number type="number" step="0.1" value="${element.y.toFixed(1)}" ${disabled}/><em>mm</em></div></label><label><span>Rotation</span><div class="unit-input"><input data-element-field="rotation" data-number type="number" min="-180" max="180" step="1" value="${element.rotation || 0}" ${disabled}/><em>°</em></div></label></div>${showColor && element.type !== 'image' ? `<label class="field-label">Color</label><div class="element-colors">${colorButtons(element.color, editingLocked)}</div>` : !showColor ? `<div class="operation-note"><b>No added color</b><span>${element.operation === 'cut' ? 'This object removes material.' : 'The exposed base material forms the engraving.'}</span></div>` : ''}<div class="inline-actions inspector-object-actions"><button id="fitElement" ${disabled}>Fit inside medal</button><button id="centerElement" ${disabled}>Center</button><button id="duplicateOtherSide" ${disabled}>Copy to ${element.face === 'back' ? 'front' : 'back'}</button><button id="lockElement" ${state.liveEdit ? 'disabled' : ''}>${element.locked ? 'Unlock' : 'Lock'}</button><button class="delete" id="deleteElement" ${disabled}>Delete</button></div></div>`;
+  const transformControls = `<div class="transform-size-card"><div class="transform-size-head"><strong>Size on medal</strong><button type="button" class="aspect-toggle ${element.lockAspect !== false ? 'active' : ''}" data-aspect-toggle ${disabled}>${element.lockAspect !== false ? '🔗 Ratio locked' : '⛓ Free width / height'}</button></div><div class="control-grid"><label><span>Width</span><div class="unit-input"><input data-element-dimension="width" type="number" min="0.5" max="${DESIGN_LIMITS.imageSizeMax}" step="0.1" value="${bounds.width.toFixed(1)}" ${disabled}/><em>mm</em></div></label><label><span>Height</span><div class="unit-input"><input data-element-dimension="height" type="number" min="0.5" max="${DESIGN_LIMITS.imageSizeMax}" step="0.1" value="${bounds.height.toFixed(1)}" ${disabled}/><em>mm</em></div></label></div><div class="scale-presets"><button type="button" data-scale-preset="0.8" ${disabled}>80%</button><button type="button" data-scale-preset="1" ${disabled}>Reset</button><button type="button" data-scale-preset="1.2" ${disabled}>120%</button></div><label class="field-label">Placed on</label><div class="segmented"><button type="button" data-element-face="front" class="${element.face !== 'back' ? 'active' : ''}" ${disabled}>Front</button><button type="button" data-element-face="back" class="${element.face === 'back' ? 'active' : ''}" ${disabled}>Back · flat</button></div>${element.face === 'back' ? '<p class="check-summary">✓ Added color is embedded into the back surface, so the medal stays flat on the build plate.</p>' : ''}<label class="field-label">Design group</label><select class="select-input" data-element-group ${disabled}><option value="">No group</option>${state.project.groups.map(group => `<option data-i18n-ignore value="${escapeHtml(group.id)}" ${element.groupId === group.id ? 'selected' : ''}>${escapeHtml(group.name)}</option>`).join('')}</select></div>`;
+  root.innerHTML = `<div class="inspector-header"><div><span class="eyebrow">${escapeHtml(translateUiKey('dynamicUi.selection'))} · ${escapeHtml(localizedElementType(element.type))}</span><h2 data-i18n-ignore>${escapeHtml(element.name)}</h2></div><span class="inspector-head-actions"><button class="icon-button" id="duplicateElement" title="Duplicate" aria-label="Duplicate ${escapeHtml(element.name)}" ${disabled}>＋</button><button class="icon-button inspector-mobile-close" id="closeInspector" aria-label="Close details">×</button></span></div>${surfaceControlsHtml(element)}${state.liveEdit ? '<div class="operation-note"><b>Live edit pending</b><span>Use OK or Cancel on the model before changing object properties.</span></div>' : ''}<div class="inspector-subsection"><span class="eyebrow">Object details</span>${specific}${transformControls}<div class="control-grid"><label><span>X position</span><div class="unit-input"><input data-element-field="x" data-number type="number" step="0.1" value="${element.x.toFixed(1)}" ${disabled}/><em>mm</em></div></label><label><span>Y position</span><div class="unit-input"><input data-element-field="y" data-number type="number" step="0.1" value="${element.y.toFixed(1)}" ${disabled}/><em>mm</em></div></label><label><span>Rotation</span><div class="unit-input"><input data-element-field="rotation" data-number type="number" min="-180" max="180" step="1" value="${element.rotation || 0}" ${disabled}/><em>°</em></div></label></div>${showColor && element.type !== 'image' ? `<label class="field-label">Color</label><div class="element-colors">${colorButtons(element.color, editingLocked)}</div>` : !showColor ? `<div class="operation-note"><b>No added color</b><span>${element.operation === 'cut' ? 'This object removes material.' : 'The exposed base material forms the engraving.'}</span></div>` : ''}<div class="inline-actions inspector-object-actions"><button id="fitElement" ${disabled}>Fit inside medal</button><button id="centerElement" ${disabled}>Center</button><button id="duplicateOtherSide" ${disabled}>Copy to ${element.face === 'back' ? 'front' : 'back'}</button><button id="lockElement" ${state.liveEdit ? 'disabled' : ''}>${element.locked ? 'Unlock' : 'Lock'}</button><button class="delete" id="deleteElement" ${disabled}>Delete</button></div></div>`;
   bindInspector();
   renderSelectionHud();
 }
@@ -3691,7 +3788,11 @@ function renderChecks() {
     : status === 'warn' ? 'Review these cautions before opening the file in your slicer.' : 'The editor found no current issues. Always verify the downloaded file in your slicer.';
   $('#checkOrb').className = `status-orb ${status}`;
   $('#footerOrb').className = `status-orb ${status}`;
-  $('#footerStatus').textContent = status === 'block' ? `${blockers} issue${blockers === 1 ? '' : 's'} to fix` : status === 'warn' ? `${warnings} caution${warnings === 1 ? '' : 's'} · ${state.project.profile.nozzle.toFixed(1)} mm` : `Checks passed · verify in slicer`;
+  $('#footerStatus').textContent = status === 'block'
+    ? localizedCount('issue', blockers)
+    : status === 'warn'
+      ? `${localizedCount('caution', warnings)} · ${localizedFixed(state.project.profile.nozzle, 1)} mm`
+      : translateUi('Checks passed · verify in slicer');
   $('#issues').innerHTML = state.checks.slice(0, 3).map(check => `<button class="issue ${check.level}" data-issue-element="${escapeHtml(check.elementId || '')}" style="border:0;text-align:left;width:100%"><span>${check.level === 'block' ? '×' : check.level === 'warn' ? '!' : '✓'}</span><span><strong>${escapeHtml(check.title)}</strong>${escapeHtml(check.message)}</span></button>`).join('');
   $$('[data-issue-element]').forEach(issue => issue.addEventListener('click', () => {
     if (issue.dataset.issueElement) { state.selectedId = issue.dataset.issueElement; renderInspector(); drawMedal(); }
@@ -3701,8 +3802,8 @@ function renderChecks() {
 
 function renderPrice() {
   state.quote = calculateQuote(state.project, state.inventory, state.quantity, currentGeometryResult());
-  $('#unitPrice').textContent = `Kč ${state.quote.unit.toLocaleString('cs-CZ')}`;
-  $('#totalPrice').textContent = `Kč ${state.quote.total.toLocaleString('cs-CZ')}`;
+  $('#unitPrice').textContent = `Kč ${formatLocalizedNumber(state.quote.unit)}`;
+  $('#totalPrice').textContent = `Kč ${formatLocalizedNumber(state.quote.total)}`;
 }
 
 function markOnboardingStep(step) {
@@ -3786,7 +3887,7 @@ function renderAll(options = {}) {
   if (colorCountInput && document.activeElement !== colorCountInput) colorCountInput.value = state.project.paletteIds.length;
   if ($('#removeDesignColor')) $('#removeDesignColor').disabled = state.project.paletteIds.length <= 1;
   if ($('#addDesignColor')) $('#addDesignColor').disabled = state.project.paletteIds.length >= DESIGN_LIMITS.paletteSlots;
-  $('#settingsSummary').textContent = `${state.project.profile.nozzle.toFixed(1)} mm · ${state.project.paletteIds.length} colors`;
+  $('#settingsSummary').textContent = `${localizedFixed(state.project.profile.nozzle, 1)} mm · ${localizedCount('color', state.project.paletteIds.length)}`;
   $('#printerDefaultsSummary').textContent = `${state.project.profile.nozzle.toFixed(1)} mm nozzle · ${state.project.profile.layerHeight.toFixed(2)} mm layers`;
   renderPalette();
   if (panel) renderToolPanel();
@@ -4351,8 +4452,9 @@ function drawMedal() {
     drawDrawingOverlay(ctx, metrics);
     ctx.restore();
     $('#canvasEmpty').hidden = state.project.elements.some(element => !element.hidden && element.face === state.drawing.face);
-    const drawHints = { select: 'Drag objects directly on this face', brush: `Draw on the highlighted ${state.drawing.face} face`, line: 'Draw a printable line · hold Shift for 15° angles', polygon: 'Click corners · Enter finishes · Backspace removes a point', erase: 'Drag across objects to erase them', measure: 'Drag to measure distance and angle' };
-    $('#stageHint').textContent = `${drawHints[state.drawing.mode]} · ${state.drawing.face === 'back' ? 'viewed from the back' : 'viewed from the front'} · Finish sketch to orbit again`;
+    const side = translateUiKey(state.drawing.face === 'back' ? 'stage.drawSideBack' : 'stage.drawSideFront');
+    const drawHints = { select: translateUiKey('stage.drawSelectFace'), brush: translateUiKey('stage.drawOnFace', { side }), line: translateUiKey('stage.drawLine'), polygon: translateUiKey('stage.drawPolygon'), erase: translateUiKey('stage.drawErase'), measure: translateUiKey('stage.drawMeasure') };
+    $('#stageHint').textContent = translateUiKey('stage.drawingHint', { hint: drawHints[state.drawing.mode], view: translateUiKey(state.drawing.face === 'back' ? 'stage.viewedBack' : 'stage.viewedFront'), finish: translateUiKey('stage.finishSketchOrbit') });
     return;
   }
   const exactResult = state.view === 'toolpath' ? currentGeometryResult() : null;
@@ -4396,9 +4498,9 @@ function drawMedal() {
   drawDrawingOverlay(ctx, metrics);
   ctx.restore();
   $('#canvasEmpty').hidden = state.project.elements.some(element => !element.hidden);
-  const drawHints = { select: 'Select and drag an element to position it', brush: 'Drag to draw a printable stroke', line: 'Drag a snapped printable line · hold Shift for 15° angles', polygon: 'Click corners · Enter finishes · Backspace removes a point', erase: 'Drag across objects to erase them', measure: 'Drag to measure distance and angle' };
+  const drawHints = { select: translateUiKey('workspace.selectDrag'), brush: translateUiKey('stage.drawStroke'), line: translateUiKey('stage.drawSnappedLine'), polygon: translateUiKey('stage.drawPolygon'), erase: translateUiKey('stage.drawErase'), measure: translateUiKey('stage.drawMeasure') };
   const selected = selectedElement();
-  $('#stageHint').textContent = state.view === '2d' ? drawHints[state.drawing.mode] : state.view === '3d' ? (state.pendingInsert ? `Click a medal face to place ${state.pendingInsert.label} · back placement is flat · Escape cancels` : selected ? (selected.face === 'back' ? `${selected.name} selected · flat back color · drag the object or its handles` : `${selected.name} selected · drag the object to move or its blue height handle`) : 'Drag empty space to orbit · drag artwork to move it') : 'Building exact printable layers on this device…';
+  $('#stageHint').textContent = state.view === '2d' ? drawHints[state.drawing.mode] : state.view === '3d' ? (state.pendingInsert ? translateUiKey('stage.pendingPlacement', { name: state.pendingInsert.label }) : selected ? translateUiKey(selected.face === 'back' ? 'stage.selectedBack' : 'stage.selectedFront', { name: selected.name }) : translateUiKey('stage.orbit')) : translateUi('Building exact printable layers on this device…');
 }
 
 function canvasPoint(event, metrics = viewMetrics()) {
@@ -4732,14 +4834,17 @@ function setCustomModalBackgroundInert(activeModal) {
   [...shell.children].forEach(child => { child.inert = Boolean(activeModal && child !== activeModal); });
 }
 
-function openDialog(eyebrow,title,html) {
+function openDialog(eyebrow,title,html, context = '') {
   if (state.dialogCleanup) {
     const cleanup = state.dialogCleanup;
     state.dialogCleanup = null;
     cleanup();
   }
   if (!dialog.open) state.dialogReturnFocus = document.activeElement;
-  $('#dialogEyebrow').textContent=eyebrow; $('#dialogTitle').textContent=title; $('#dialogBody').innerHTML=html; if(!dialog.open)dialog.showModal();
+  dialog.dataset.context = context;
+  $('#dialogEyebrow').textContent=eyebrow; $('#dialogTitle').textContent=title; $('#dialogBody').innerHTML=html;
+  localizeSubtree(dialog);
+  if(!dialog.open)dialog.showModal();
   requestAnimationFrame(() => dialog.querySelector('[autofocus], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])')?.focus());
 }
 function closeDialog(){
@@ -4754,6 +4859,7 @@ function closeDialog(){
     cleanup();
   }
   if(dialog.open)dialog.close();
+  delete dialog.dataset.context;
   if (state.dialogReturnFocus?.isConnected) state.dialogReturnFocus.focus();
   state.dialogReturnFocus = null;
 }
@@ -4764,7 +4870,7 @@ function guideTranscriptMarkup(guide) {
 
 function guidePlayerMarkup(guide) {
   return `<div class="guide-video-frame">
-    <video id="guideVideo" controls playsinline preload="metadata" poster="${escapeHtml(guideAssetUrl(guide.poster))}" aria-label="${escapeHtml(guide.title)} video guide" aria-describedby="guideOutcome guideMediaStatus">
+    <video id="guideVideo" controls playsinline preload="metadata" poster="${escapeHtml(guideAssetUrl(guide.poster))}" aria-labelledby="guideCurrentTitle" aria-describedby="guideOutcome guideMediaStatus">
       <source id="guideVideoSource" src="${escapeHtml(guideAssetUrl(guide.video))}" type="video/mp4">
       <track id="guideVideoCaptions" src="${escapeHtml(guideAssetUrl(guide.captions))}" kind="captions" srclang="en" label="English">
       Your browser cannot play this guide. Use the written transcript below or restart the interactive guide.
@@ -4781,7 +4887,6 @@ function activateGuideChapter(guideId, { announce = true } = {}) {
 
   video.pause();
   video.poster = guideAssetUrl(guide.poster);
-  video.setAttribute('aria-label', `${guide.title} video guide`);
   source.src = guideAssetUrl(guide.video);
   captions.src = guideAssetUrl(guide.captions);
   $('#guideCurrentTitle').textContent = guide.title;
@@ -5046,18 +5151,26 @@ function wizardPreviewProject(wizard, overrides = {}) {
 }
 
 function wizardLivePreviewMarkup(project) {
-  const attachment = ATTACHMENT_STYLE_INFO[project.medal.loopStyle];
-  return `<figure class="wizard-live-preview"><div class="wizard-live-preview-canvas">${exactMedalPreview(project, { showDimensions: true, label: `Exact 2D top view of ${project.medal.shape} medal with ${attachment.label}` })}</div><figcaption><span class="wizard-preview-kicker">Live 2D preview · exact printable outline</span><strong>${escapeHtml(project.medal.shape[0].toUpperCase() + project.medal.shape.slice(1))} medal with ${escapeHtml(attachment.label.toLowerCase())}</strong><div class="wizard-preview-facts"><span><b>Body</b>${escapeHtml(medalSizeLabel(project))}</span><span><b>Finished footprint</b>${escapeHtml(medalOverallSizeLabel(project))}</span><span><b>Ribbon</b>${escapeHtml(attachmentOpeningLabel(project))}</span></div></figcaption></figure>`;
+  const shape = localizedMedalShapeName(project.medal.shape);
+  const attachment = localizedAttachmentName(project.medal.loopStyle);
+  const previewLabel = translateUiKey('wizardUi.exactTopView', { shape, attachment });
+  return `<figure class="wizard-live-preview"><div class="wizard-live-preview-canvas">${exactMedalPreview(project, { showDimensions: true, label: previewLabel })}</div><figcaption><span class="wizard-preview-kicker">${escapeHtml(translateUiKey('wizardUi.livePreview'))}</span><strong>${escapeHtml(translateUiKey('wizardUi.medalWith', { shape, attachment }))}</strong><div class="wizard-preview-facts"><span><b>${escapeHtml(translateUiKey('wizardUi.body'))}</b>${escapeHtml(localizedMedalSize(project))}</span><span><b>${escapeHtml(translateUiKey('wizardUi.finishedFootprint'))}</b>${escapeHtml(localizedMedalOverallSize(project))}</span><span><b>${escapeHtml(translateUiKey('wizardUi.ribbon'))}</b>${escapeHtml(localizedAttachmentOpening(project))}</span></div></figcaption></figure>`;
 }
 
 function wizardShapeChoiceMarkup(wizard, shape, label) {
   const project = wizardPreviewProject(wizard, { shape });
-  return `<button type="button" role="radio" aria-checked="${wizard.shape === shape}" class="wizard-choice wizard-shape-choice ${wizard.shape === shape ? 'active' : ''}" data-wizard-shape="${shape}"><span class="wizard-choice-geometry" data-wizard-shape-preview="${shape}">${exactMedalPreview(project, { compact: true, showDimensions: false, label: `${label} medal with ${ATTACHMENT_STYLE_INFO[project.medal.loopStyle].label}` })}</span><span>${escapeHtml(label)}</span><small><em data-wizard-shape-size="${shape}">${escapeHtml(medalSizeLabel(project))}</em> printable body</small></button>`;
+  const shapeName = localizedMedalShapeName(shape);
+  const attachmentName = localizedAttachmentName(project.medal.loopStyle);
+  const previewLabel = translateUiKey('wizardUi.exactTopView', { shape: shapeName, attachment: attachmentName });
+  return `<button type="button" role="radio" aria-checked="${wizard.shape === shape}" class="wizard-choice wizard-shape-choice ${wizard.shape === shape ? 'active' : ''}" data-wizard-shape="${shape}"><span class="wizard-choice-geometry" data-wizard-shape-preview="${shape}">${exactMedalPreview(project, { compact: true, showDimensions: false, label: previewLabel })}</span><span>${escapeHtml(shapeName || label)}</span><small><em data-wizard-shape-size="${shape}">${escapeHtml(localizedMedalSize(project))}</em> ${escapeHtml(translateUiKey('wizardUi.printableBody'))}</small></button>`;
 }
 
 function wizardAttachmentChoiceMarkup(wizard, style, info) {
   const project = wizardPreviewProject(wizard, { attachment: style });
-  return `<button type="button" role="radio" aria-checked="${wizard.attachment === style}" class="attachment-card wizard-attachment-choice ${wizard.attachment === style ? 'active' : ''}" data-wizard-attachment="${style}"><span class="attachment-geometry-icon">${exactMedalPreview(project, { compact: true, showDimensions: false, label: `${info.label} on the selected ${project.medal.shape} medal` })}</span><strong>${escapeHtml(info.label)}</strong><small>${escapeHtml(info.description)}</small><em>${escapeHtml(attachmentOpeningLabel(project))}</em></button>`;
+  const shapeName = localizedMedalShapeName(project.medal.shape);
+  const attachmentName = localizedAttachmentName(style);
+  const previewLabel = translateUiKey('wizardUi.attachmentOnMedal', { attachment: attachmentName, shape: shapeName });
+  return `<button type="button" role="radio" aria-checked="${wizard.attachment === style}" class="attachment-card wizard-attachment-choice ${wizard.attachment === style ? 'active' : ''}" data-wizard-attachment="${style}"><span class="attachment-geometry-icon">${exactMedalPreview(project, { compact: true, showDimensions: false, label: previewLabel })}</span><strong>${escapeHtml(attachmentName)}</strong><small>${escapeHtml(info.description)}</small><em>${escapeHtml(localizedAttachmentOpening(project))}</em></button>`;
 }
 
 function refreshWizardGeometryPreviews({ shapes = false } = {}) {
@@ -5071,7 +5184,7 @@ function refreshWizardGeometryPreviews({ shapes = false } = {}) {
     const candidate = wizardPreviewProject(wizard, { shape });
     host.innerHTML = exactMedalPreview(candidate, { compact: true, showDimensions: false, label: `${shape} medal with ${ATTACHMENT_STYLE_INFO[candidate.medal.loopStyle].label}` });
     const size = host.closest('[data-wizard-shape]')?.querySelector('[data-wizard-shape-size]');
-    if (size) size.textContent = medalSizeLabel(candidate);
+    if (size) size.textContent = localizedMedalSize(candidate);
   });
 }
 
@@ -5093,14 +5206,17 @@ function wizardAttachmentFields(wizard) {
 function renderNewDesignWizard() {
   const wizard = state.wizard;
   if (!wizard || !dialog.open) return;
-  const titles = ['Choose a starting point', 'Choose the medal body', 'Choose the ribbon attachment', wizard.template === 'blank' ? 'Tell us about your event' : 'Personalize the wording in 3D', 'Ready to design'];
+  const titles = [
+    translateUiKey('wizardUi.titleStart'), translateUiKey('wizardUi.titleBody'), translateUiKey('wizardUi.titleRibbon'),
+    translateUiKey(wizard.template === 'blank' ? 'wizardUi.titleEvent' : 'wizardUi.titlePersonalize'), translateUiKey('wizardUi.titleReady'),
+  ];
   $('#dialogEyebrow').textContent = `New medal · step ${wizard.step + 1} of 5`;
   $('#dialogTitle').textContent = titles[wizard.step];
   const progress = `<div class="wizard-progress" aria-label="Step ${wizard.step + 1} of 5">${[0,1,2,3,4].map(step => `<i class="${step <= wizard.step ? 'done' : ''}"></i>`).join('')}</div>`;
   let content = '';
   if (wizard.step === 0) {
     const entries = ['blank', 'alpine-current-25k', 'showcase-night', 'podium-classic'];
-    content = `<p class="dialog-lede">Start clean, or personalize one of the same polished, printable medals shown in the gallery.</p><div class="wizard-choice-grid" role="radiogroup" aria-label="Starting medal">${entries.map(key => { const info = GALLERY_TEMPLATE_INFO[key]; return `<button type="button" role="radio" aria-checked="${wizard.template === key}" class="wizard-choice ${wizard.template === key ? 'active' : ''}" data-wizard-template="${key}">${templatePreviewMarkup(key, info)}<span>${escapeHtml(info.label)}</span><small>${escapeHtml(info.meta)} · every item stays editable</small></button>`; }).join('')}</div>`;
+    content = `<p class="dialog-lede">Start clean, or personalize one of the same polished, printable medals shown in the gallery.</p><div class="wizard-choice-grid" role="radiogroup" aria-label="Starting medal">${entries.map(key => { const info = GALLERY_TEMPLATE_INFO[key]; return `<button type="button" role="radio" aria-checked="${wizard.template === key}" class="wizard-choice ${wizard.template === key ? 'active' : ''}" data-wizard-template="${key}">${templatePreviewMarkup(key, info)}<span>${escapeHtml(info.label)}</span><small><span>${escapeHtml(info.meta)}</span> · ${escapeHtml(translateUiKey('wizardUi.everyItemEditable'))}</small></button>`; }).join('')}</div>`;
   } else if (wizard.step === 1) {
     if (wizard.template !== 'blank') {
       const project = wizardProject(wizard), info = GALLERY_TEMPLATE_INFO[wizard.template];
@@ -5116,15 +5232,19 @@ function renderNewDesignWizard() {
       content = `<div class="wizard-fixed-example"><span class="wizard-fixed-geometry">${exactMedalPreview(project, { compact: true, showDimensions: false })}</span><div><strong>${escapeHtml(attachment.label)} is fitted to this example</strong><p class="dialog-lede">This is the real top-view outline, including every opening. It stays fully editable in the Medal tool after opening.</p></div></div>`;
     } else {
       const project = wizardProject(wizard);
-      content = `<div class="wizard-setup-layout wizard-attachment-layout"><section class="wizard-setup-controls"><p class="dialog-lede">Pick how the ribbon is fitted. These are exact top views on your selected ${escapeHtml(project.medal.shape)} body—not generic symbols.</p><div class="attachment-picker wizard-attachments" role="radiogroup" aria-label="Ribbon attachment">${Object.entries(ATTACHMENT_STYLE_INFO).map(([key, info]) => wizardAttachmentChoiceMarkup(wizard, key, info)).join('')}</div>${['single','double','slit','open-slit'].includes(wizard.attachment) ? '<div class="ribbon-presets"><span>Ribbon width</span><button type="button" data-wizard-ribbon="22">22 mm</button><button type="button" data-wizard-ribbon="25" class="recommended">25 mm standard</button><button type="button" data-wizard-ribbon="38">38 mm wide</button></div>' : ''}<details class="friendly-disclosure"><summary>Fine-tune the opening</summary><div id="wizardAttachmentFields">${wizardAttachmentFields(wizard)}</div></details></section><aside data-wizard-live-preview aria-live="polite">${wizardLivePreviewMarkup(project)}</aside></div>`;
+      content = `<div class="wizard-setup-layout wizard-attachment-layout"><section class="wizard-setup-controls"><p class="dialog-lede">Pick how the ribbon is fitted. These are exact top views on your selected ${escapeHtml(localizedMedalShapeName(project.medal.shape))} body—not generic symbols.</p><div class="attachment-picker wizard-attachments" role="radiogroup" aria-label="Ribbon attachment">${Object.entries(ATTACHMENT_STYLE_INFO).map(([key, info]) => wizardAttachmentChoiceMarkup(wizard, key, info)).join('')}</div>${['single','double','slit','open-slit'].includes(wizard.attachment) ? `<div class="ribbon-presets"><span>${escapeHtml(translateUiKey('medalSettingsUi.ribbonWidth'))}</span><button type="button" data-wizard-ribbon="22">22 mm</button><button type="button" data-wizard-ribbon="25" class="recommended">${escapeHtml(translateUiKey('medalSettingsUi.standardRibbon', { width: '25' }))}</button><button type="button" data-wizard-ribbon="38">${escapeHtml(translateUiKey('medalSettingsUi.wideRibbon', { width: '38' }))}</button></div>` : ''}<details class="friendly-disclosure"><summary>Fine-tune the opening</summary><div id="wizardAttachmentFields">${wizardAttachmentFields(wizard)}</div></details></section><aside data-wizard-live-preview aria-live="polite">${wizardLivePreviewMarkup(project)}</aside></div>`;
     }
   } else if (wizard.step === 3) {
     content = wizard.template === 'blank'
       ? `<p class="dialog-lede">We will add this as crisp, editable text. You can move, resize, recolor, or delete every line in 3D.</p><div class="tool-form"><label><span>Event name</span><input class="text-input" id="wizardEventName" maxlength="60" value="${escapeHtml(wizard.eventName)}" placeholder="City Night Run"></label><div class="dimension-grid"><label><span>Distance or award</span><input class="text-input" id="wizardDistance" maxlength="24" value="${escapeHtml(wizard.distance)}" placeholder="10 KM"></label><label><span>Date</span><input class="text-input" id="wizardEventDate" maxlength="30" value="${escapeHtml(wizard.eventDate)}" placeholder="18. 9. 2027"></label></div></div>`
       : `<div class="wizard-fixed-example"><b class="wizard-attachment-icon">✦</b><div><strong>This polished example already includes editable wording</strong><p class="dialog-lede">Open it, click any word directly on the medal, and type your own event name, distance, or date.</p></div></div>`;
   } else {
-    const project = wizardProject(wizard), attachment = ATTACHMENT_STYLE_INFO[project.medal.loopStyle];
-    content = `<div class="wizard-summary"><div class="wizard-summary-geometry">${exactMedalPreview(project, { showDimensions: true })}</div><div><h3>${escapeHtml(project.name)}</h3><p class="dialog-lede">This is the same exact body and ribbon outline that opens in the rotatable 3D workspace. Add an object, move over the front or back face, and click only when its real preview is in the right place.</p><ul><li>${escapeHtml(medalSizeLabel(project))} ${escapeHtml(project.medal.shape)} body</li><li>${escapeHtml(medalOverallSizeLabel(project))}</li><li>${escapeHtml(attachment.label)} · ${escapeHtml(attachmentOpeningLabel(project))}</li><li>${project.paletteIds.length} local filament colors</li><li>${wizard.template === 'blank' ? `${project.elements.length} editable starter text items` : `${project.elements.length} editable example objects`}</li></ul></div></div>`;
+    const project = wizardProject(wizard);
+    const shapeName = localizedMedalShapeName(project.medal.shape), attachmentName = localizedAttachmentName(project.medal.loopStyle);
+    const itemCount = wizard.template === 'blank'
+      ? localizedPluralMessage('wizardUi.starterTextItem', project.elements.length)
+      : localizedPluralMessage('wizardUi.exampleObject', project.elements.length);
+    content = `<div class="wizard-summary"><div class="wizard-summary-geometry">${exactMedalPreview(project, { showDimensions: true })}</div><div><h3 data-i18n-ignore>${escapeHtml(project.name)}</h3><p class="dialog-lede">This is the same exact body and ribbon outline that opens in the rotatable 3D workspace. Add an object, move over the front or back face, and click only when its real preview is in the right place.</p><ul><li>${escapeHtml(translateUiKey('wizardUi.shapeBody', { size: localizedMedalSize(project), shape: shapeName }))}</li><li>${escapeHtml(localizedMedalOverallSize(project))}</li><li>${escapeHtml(attachmentName)} · ${escapeHtml(localizedAttachmentOpening(project))}</li><li>${escapeHtml(localizedPluralMessage('wizardUi.localFilamentColor', project.paletteIds.length))}</li><li>${escapeHtml(itemCount)}</li></ul></div></div>`;
   }
   const back = wizard.step > 0 ? '<button class="button secondary" type="button" id="wizardBack">Back</button>' : '<button class="button secondary" type="button" id="wizardCancel">Cancel</button>';
   const next = wizard.step < 4 ? '<button class="button primary" type="button" id="wizardNext">Continue</button>' : '<button class="button primary" type="button" id="wizardFinish">Open in 3D</button>';
@@ -5236,25 +5356,25 @@ async function showProjectLibrary() {
   if (state.liveEdit) { toast('Apply or restore the current height change before opening My medals'); return; }
   const requestId = uid('library');
   state.libraryRequestId = requestId;
-  openDialog('My medals', 'Loading saved medals', '<div class="export-progress"><span class="spinner"></span> Saving the current medal and opening your local library…</div>');
+  openDialog('My medals', 'Loading saved medals', '<div class="export-progress"><span class="spinner"></span> Saving the current medal and opening your local library…</div>', 'project-library-loading');
   if (state.saveDirty && !await persistProject()) {
     downloadEmergencyBackup();
     toast('The current medal could not be saved here, so a backup was downloaded. It is still open and unchanged.', { error: true });
     closeDialog();
     return;
   }
-  if (!dialog.open || state.libraryRequestId !== requestId || $('#dialogTitle')?.textContent !== 'Loading saved medals') return;
+  if (!dialog.open || state.libraryRequestId !== requestId || dialog.dataset.context !== 'project-library-loading') return;
   const library = Array.isArray(state.projectLibrary) ? state.projectLibrary : [];
   const entries = library.length ? library : [{ id: state.project.id, name: state.project.name, createdAt: state.project.createdAt, updatedAt: state.project.updatedAt, elements: state.project.elements.length, colors: state.project.paletteIds.length }];
   const cards = entries.map(item => {
     const current = item.id === state.project.id;
-    const date = item.updatedAt ? new Date(item.updatedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'Saved on this device';
+    const date = item.updatedAt ? new Date(item.updatedAt).toLocaleString(getCurrentLocaleTag(), { dateStyle: 'medium', timeStyle: 'short' }) : 'Saved on this device';
     const elementCount = Number(item.elements) || 0, colorCount = Number(item.colors) || 1;
-    return `<article class="project-library-card ${current ? 'current' : ''}"><span class="project-library-thumb">${escapeHtml(String(item.name || 'M').trim().slice(0, 2).toUpperCase())}</span><span class="project-library-copy"><strong>${escapeHtml(item.name || 'Untitled medal')}</strong><small>${elementCount} item${elementCount === 1 ? '' : 's'} · ${colorCount} color${colorCount === 1 ? '' : 's'} · ${escapeHtml(date)}</small></span><span class="project-library-actions">${current ? '<b>Open</b>' : `<button type="button" data-open-project="${escapeHtml(item.id)}">Open</button>`}<button type="button" data-copy-project="${escapeHtml(item.id)}">Copy</button></span></article>`;
+    return `<article class="project-library-card ${current ? 'current' : ''}"><span class="project-library-thumb" data-i18n-ignore>${escapeHtml(String(item.name || 'M').trim().slice(0, 2).toUpperCase())}</span><span class="project-library-copy"><strong data-i18n-ignore>${escapeHtml(item.name || 'Untitled medal')}</strong><small>${elementCount} item${elementCount === 1 ? '' : 's'} · ${colorCount} color${colorCount === 1 ? '' : 's'} · ${escapeHtml(date)}</small></span><span class="project-library-actions">${current ? '<b>Open</b>' : `<button type="button" data-open-project="${escapeHtml(item.id)}">Open</button>`}<button type="button" data-copy-project="${escapeHtml(item.id)}">Copy</button></span></article>`;
   }).join('');
   const recovery = await loadRecord('projects', `recovery-${state.project.id}`, null);
-  if (!dialog.open || state.libraryRequestId !== requestId || $('#dialogTitle')?.textContent !== 'Loading saved medals') return;
-  openDialog('My medals', 'Saved on this device', `<p class="dialog-lede">MedalForge autosaves the medal you are editing. Use copies when you want to explore a new direction without changing the original.</p><div class="project-library-list">${cards}</div><div class="dialog-actions split-actions"><button class="button secondary" type="button" id="libraryNewMedal">New medal</button><button class="button secondary" type="button" id="libraryOpenFile">Open project file</button>${recovery ? '<button class="button secondary" type="button" id="restoreRecovery">Restore previous version</button>' : ''}<button class="button secondary" type="button" id="downloadCurrentBackup">Download backup</button><button class="button primary" type="button" data-close-dialog>Done</button></div>`);
+  if (!dialog.open || state.libraryRequestId !== requestId || dialog.dataset.context !== 'project-library-loading') return;
+  openDialog('My medals', 'Saved on this device', `<p class="dialog-lede">MedalForge autosaves the medal you are editing. Use copies when you want to explore a new direction without changing the original.</p><div class="project-library-list">${cards}</div><div class="dialog-actions split-actions"><button class="button secondary" type="button" id="libraryNewMedal">New medal</button><button class="button secondary" type="button" id="libraryOpenFile">Open project file</button>${recovery ? '<button class="button secondary" type="button" id="restoreRecovery">Restore previous version</button>' : ''}<button class="button secondary" type="button" id="downloadCurrentBackup">Download backup</button><button class="button primary" type="button" data-close-dialog>Done</button></div>`, 'project-library');
   $('[data-close-dialog]')?.addEventListener('click', closeDialog);
   $('#downloadCurrentBackup')?.addEventListener('click', () => downloadEmergencyBackup());
   $('#libraryOpenFile')?.addEventListener('click', () => $('#projectInput').click());
@@ -5322,7 +5442,7 @@ function showChecksDialog() {
 
 function showPriceDialog() {
   const quantities=[...new Set([1,10,25,50,100,state.quantity])].sort((a,b)=>a-b);
-  const rows=quantities.map(q=>{const quote=calculateQuote(state.project,state.inventory,q,currentGeometryResult());return `<tr class="${q===state.quantity?'selected':''}"><td>${q}</td><td>Kč ${quote.unit.toLocaleString('cs-CZ')}</td><td>Kč ${quote.total.toLocaleString('cs-CZ')}</td></tr>`;}).join('');
+  const rows=quantities.map(q=>{const quote=calculateQuote(state.project,state.inventory,q,currentGeometryResult());return `<tr class="${q===state.quantity?'selected':''}"><td>${q}</td><td>Kč ${formatLocalizedNumber(quote.unit)}</td><td>Kč ${formatLocalizedNumber(quote.total)}</td></tr>`;}).join('');
   const q=state.quote;
   openDialog('Price estimate','Price by quantity',`<p class="dialog-lede">${q.geometryBased ? 'This estimate uses the built 3D volume and the density and price of every chosen filament.' : 'This quick estimate uses the medal size and artwork while the detailed 3D volume finishes building.'} It includes material, machine time and setup; confirm the final price after slicing and a test print.</p><table class="price-table"><thead><tr><th>Quantity</th><th>Per medal</th><th>Estimated total</th></tr></thead><tbody>${rows}</tbody></table><div class="breakdown"><div><small>Material / medal</small><strong>Kč ${q.materialPerPiece}</strong></div><div><small>Machine / medal</small><strong>Kč ${q.machinePerPiece}</strong></div><div><small>One-time setup</small><strong>Kč ${q.setup}</strong></div><div><small>Weight / medal</small><strong>${q.gramsPerPiece.toFixed(1)} g</strong></div></div><p class="check-summary">Estimate only · electricity, failed prints, packaging, tax and shipping depend on your production setup.</p><div class="dialog-actions"><button class="button primary" data-close-dialog>Done</button></div>`); $('[data-close-dialog]').addEventListener('click',closeDialog);
 }
@@ -5393,13 +5513,13 @@ function renderExportDialog({ preflighting = false, error = '' } = {}) {
   const blocked=preflighting||Boolean(error)||geometryBlockers.length > 0;
   const blockerList = geometryBlockers.slice(0, 4).map(check => `<li><strong>${escapeHtml(check.title)}</strong><span>${escapeHtml(check.message)}</span></li>`).join('');
   const statusHtml=preflighting
-    ? '<div class="export-progress" id="exportProgress"><span class="spinner"></span> Refreshing the latest printable preview and manufacturing checks…</div>'
+    ? `<div class="export-progress" id="exportProgress"><span class="spinner"></span> ${escapeHtml(translateUiKey('export.refreshingChecks'))}</div>`
     : error
-      ? `<div class="export-progress error" id="exportProgress">Final print check failed: ${escapeHtml(error)}</div>`
+      ? `<div class="export-progress error" id="exportProgress">${escapeHtml(translateUiKey('export.finalCheckFailed', { message: error }))}</div>`
       : blocked
-        ? `<div class="export-progress error export-blocker-summary" id="exportProgress"><strong>${geometryBlockers.length} printability issue${geometryBlockers.length === 1 ? '' : 's'} must be fixed before 3MF/STL/STEP/PDF export</strong><ul>${blockerList}</ul>${geometryBlockers.length > 4 ? `<small>And ${geometryBlockers.length - 4} more. Open the printability report for the full list.</small>` : ''}<button class="button secondary" type="button" id="reviewExportBlockers">Review all printability checks</button><small>Project JSON and SVG remain available while you edit.</small></div>`
-        : `<div class="export-progress" id="exportProgress">${stockBlockers.length ? 'The model is ready, but your saved stock is too low for this quantity. Design downloads are still available.' : warnings ? `No blocking issues · review ${warnings} caution${warnings === 1 ? '' : 's'} before printing.` : 'Editor checks passed.'} Print-file export performs one final closed-body and loose-part check on this device.</div>`;
-  openDialog('Check & export','What would you like to do?',`<p class="dialog-lede">Everything is created on this device. For normal multicolor printing, choose the first option and open the downloaded 3MF in your slicer for the final printer check.</p><div class="export-grid"><button class="export-card recommended" data-export="3mf" ${blocked?'disabled':''}><b>Print it myself · 3MF <span>→</span></b><p>One aligned multicolor file with named filament pieces and a color manifest.</p><small>Recommended for PrusaSlicer, OrcaSlicer and Bambu Studio</small></button><button class="export-card" data-export="stl" ${blocked?'disabled':''}><b>Send to a print maker · STL ZIP <span>→</span></b><p>Separate aligned color files for makers who request STL.</p></button><button class="export-card report-export" data-export="pdf" ${blocked?'disabled':''}><b>Send a preview & estimate · PDF <span>→</span></b><p>Front, back, 3D and side views with dimensions, weight, colors and quantity estimate.</p><small>Easy to email for approval</small></button><button class="export-card" data-export="step" ${blocked?'disabled':''}><b>Continue in CAD · STEP <span>→</span></b><p>Validated B-Rep solids rebuilt from the production geometry. Vector objects stay smoother than raster artwork.</p><small>Advanced CAD exchange</small></button></div><details class="friendly-disclosure"><summary>Advanced design files</summary><div class="export-grid"><button class="export-card" data-export="svg"><b>2D design SVG <span>→</span></b><p>Editable two-side design reference in physical millimeters.</p></button><button class="export-card" data-export="json"><b>Editable MedalForge backup <span>→</span></b><p>Reopens every editable word, item, color and manufacturing setting.</p></button></div></details>${statusHtml}<div class="server-option"><div><strong>Private local processing</strong><span>No design or production file is uploaded. The editor reports known design issues; your slicer remains the final authority.</span></div><b>On this device</b></div>`);
+        ? `<div class="export-progress error export-blocker-summary" id="exportProgress"><strong>${escapeHtml(localizedPluralMessage('export.blockers', geometryBlockers.length))}</strong><ul>${blockerList}</ul>${geometryBlockers.length > 4 ? `<small>${escapeHtml(translateUiKey('export.moreBlockers', { count: formatLocalizedNumber(geometryBlockers.length - 4) }))}</small>` : ''}<button class="button secondary" type="button" id="reviewExportBlockers">${escapeHtml(translateUiKey('export.reviewPrintability'))}</button><small>${escapeHtml(translateUiKey('export.backupAvailable'))}</small></div>`
+        : `<div class="export-progress" id="exportProgress">${escapeHtml(stockBlockers.length ? translateUiKey('export.stockLow') : warnings ? localizedPluralMessage('export.warnings', warnings) : translateUiKey('export.checksPassed'))} ${escapeHtml(translateUiKey('export.finalValidation'))}</div>`;
+  openDialog('Check & export','What would you like to do?',`<p class="dialog-lede">Everything is created on this device. For normal multicolor printing, choose the first option and open the downloaded 3MF in your slicer for the final printer check.</p><div class="export-grid"><button class="export-card recommended" data-export="3mf" ${blocked?'disabled':''}><b>Print it myself · 3MF <span>→</span></b><p>One aligned multicolor file with named filament pieces and a color manifest.</p><small>Recommended for PrusaSlicer, OrcaSlicer and Bambu Studio</small></button><button class="export-card" data-export="stl" ${blocked?'disabled':''}><b>Send to a print maker · STL ZIP <span>→</span></b><p>Separate aligned color files for makers who request STL.</p></button><button class="export-card report-export" data-export="pdf" ${blocked?'disabled':''}><b>Send a preview & estimate · PDF <span>→</span></b><p>Front, back, 3D and side views with dimensions, weight, colors and quantity estimate.</p><small>Easy to email for approval</small></button><button class="export-card" data-export="step" ${blocked?'disabled':''}><b>Continue in CAD · STEP <span>→</span></b><p>Validated B-Rep solids rebuilt from the production geometry. Vector objects stay smoother than raster artwork.</p><small>Advanced CAD exchange</small></button></div><details class="friendly-disclosure"><summary>Advanced design files</summary><div class="export-grid"><button class="export-card" data-export="svg"><b>2D design SVG <span>→</span></b><p>Editable two-side design reference in physical millimeters.</p></button><button class="export-card" data-export="json"><b>Editable MedalForge backup <span>→</span></b><p>Reopens every editable word, item, color and manufacturing setting.</p></button></div></details>${statusHtml}<div class="server-option"><div><strong>Private local processing</strong><span>No design or production file is uploaded. The editor reports known design issues; your slicer remains the final authority.</span></div><b>On this device</b></div>`, 'export');
   $$('[data-export]').forEach(button=>button.addEventListener('click',()=>runExport(button.dataset.export)));
   $('#reviewExportBlockers')?.addEventListener('click', showChecksDialog);
 }
@@ -5412,10 +5532,10 @@ async function showExportDialog() {
   renderExportDialog({ preflighting: true });
   try {
     await ensureGeometryResult(message=>{const progress=$('#exportProgress');if(progress)progress.textContent=message;});
-    if(!dialog.open || state.exportPreflightId !== requestId || $('#dialogTitle')?.textContent !== 'What would you like to do?')return;
+    if(!dialog.open || state.exportPreflightId !== requestId || dialog.dataset.context !== 'export')return;
     renderChecks();renderPrice();renderExportDialog();
   } catch(error) {
-    if(dialog.open && state.exportPreflightId === requestId && $('#dialogTitle')?.textContent === 'What would you like to do?')renderExportDialog({ error: error.message });
+    if(dialog.open && state.exportPreflightId === requestId && dialog.dataset.context === 'export')renderExportDialog({ error: error.message });
     if(error?.name !== 'AbortError')console.error(error);
   }
 }
@@ -5464,8 +5584,8 @@ async function runExport(kind) {
   const project=enrichForExport(state.project,state.inventory); const base=safeFilename(project.name); const progress=$('#exportProgress');
   $$('[data-export]').forEach(button => { button.disabled = true; });
   const ensureActive = () => { if (job.cancelled || state.exportJob !== job) { const error = new Error('Export cancelled'); error.name = 'AbortError'; throw error; } };
-  const complete = message => { markOnboardingStep('export'); if(progress)progress.textContent=message; };
-  const update=message=>{if(!job.cancelled && progress && progress.isConnected && dialog.open){progress.classList.remove('error');progress.innerHTML=`<span>${escapeHtml(message)}</span><button type="button" class="button secondary" id="cancelExportJob">Stop after current step</button>`;$('#cancelExportJob')?.addEventListener('click',()=>{job.cancelled=true;job.abortController.abort();progress.textContent=job.worker ? 'Stopping the geometry job…' : 'Stopping after the current export step…';});}};
+  const complete = message => { markOnboardingStep('export'); if(progress)progress.textContent=translateUi(message); };
+  const update=message=>{if(!job.cancelled && progress && progress.isConnected && dialog.open){progress.classList.remove('error');progress.innerHTML=`<span>${escapeHtml(translateUi(message))}</span><button type="button" class="button secondary" id="cancelExportJob">Stop after current step</button>`;localizeSubtree(progress);$('#cancelExportJob')?.addEventListener('click',()=>{job.cancelled=true;job.abortController.abort();progress.textContent=translateUi(job.worker ? 'Stopping the geometry job…' : 'Stopping after the current export step…');});}};
   try {
     if(kind==='json') { const payload=projectBundleForExport(state.project,state.inventory);ensureActive();downloadBlob(new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),`${base}.medalforge.json`);complete('Editable backup downloaded.');return; }
     if(kind==='svg') { ensureActive();downloadBlob(new Blob([projectToSvg(project)],{type:'image/svg+xml'}),`${base}.svg`);complete('SVG design reference downloaded.');return; }
@@ -5486,10 +5606,10 @@ async function runExport(kind) {
           state.viewer.restoreCamera(camera); state.viewer.setGrid(gridVisible); updateRibbonPreview(); state.viewer.renderNow();
         }
       }
-      const report = await buildTechnicalSheetPdf({ project: state.project, inventory: state.inventory, geometry, quantity: state.quantity, checks: state.checks, viewDataUrl });
+      const report = await buildTechnicalSheetPdf({ project: state.project, inventory: state.inventory, geometry, quantity: state.quantity, checks: state.checks, viewDataUrl, locale: getCurrentLocale(), localeTag: getCurrentLocaleTag(), translate: translateUi });
       ensureActive();
       downloadBlob(report.blob, report.filename);
-      complete(`PDF downloaded · ${report.model.quote.gramsPerPiece.toFixed(1)} g · Kč ${report.model.quote.total.toLocaleString('cs-CZ')} total estimate.`);
+      complete(`PDF downloaded · ${formatLocalizedNumber(report.model.quote.gramsPerPiece, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} g · Kč ${formatLocalizedNumber(report.model.quote.total)} total estimate.`);
       return;
     }
     const {meshes}=geometry;
@@ -5500,10 +5620,10 @@ async function runExport(kind) {
       downloadBlob(result.blob,`${base}.step`);
       complete(`STEP downloaded · ${result.stats.solidCount} validated solid ${result.stats.solidCount===1?'body':'bodies'} · ${(result.stats.sourceVolumeMm3/1000).toFixed(2)} cm³.`);
     }
-    if(kind==='3mf'){update('Streaming and compressing color parts into 3MF…');await new Promise(resolve=>setTimeout(resolve,10));const blob=await meshesTo3mf(project,meshes);ensureActive();downloadBlob(blob,`${base}.3mf`);complete(`3MF downloaded with ${meshes.length} aligned filament piece${meshes.length===1?'':'s'}.`);}
+    if(kind==='3mf'){update('Streaming and compressing color parts into 3MF…');await new Promise(resolve=>setTimeout(resolve,10));const blob=await meshesTo3mf(project,meshes,{locale:getCurrentLocaleTag()});ensureActive();downloadBlob(blob,`${base}.3mf`);complete(`3MF downloaded with ${meshes.length} aligned filament piece${meshes.length===1?'':'s'}.`);}
     if(kind==='stl'){update('Packaging aligned binary STLs…');const blob=await meshesToStlZip(project,meshes);ensureActive();downloadBlob(blob,`${base}-stl-parts.zip`);complete(`STL ZIP downloaded with ${meshes.length} printable part${meshes.length===1?'':'s'}.`);}
   } catch(error) {
-    if(progress && dialog.open){progress.classList.toggle('error', error.name !== 'AbortError');progress.textContent=error.name === 'AbortError' ? 'Export cancelled. No download was started.' : `Export failed: ${error.message}`;}
+    if(progress && dialog.open){progress.classList.toggle('error', error.name !== 'AbortError');progress.textContent=translateUi(error.name === 'AbortError' ? 'Export cancelled. No download was started.' : `Export failed: ${error.message}`);}
     if(error.name !== 'AbortError')console.error(error);
   } finally {
     job.abortController.abort();
@@ -5945,7 +6065,7 @@ function renderImagePartsPanel(session) {
     const color = palette[preference.color] || palette[0];
     const boxWidth = (region.maxX - region.minX + 1) / session.latest.pixelWidth * session.width;
     const boxHeight = (region.maxY - region.minY + 1) / session.latest.pixelHeight * session.height;
-    return `<div class="image-part-row ${region.editorKey === session.selectedPartKey ? 'selected' : ''} ${preference.enabled ? '' : 'excluded'}" data-part-row="${escapeHtml(region.editorKey)}"><label class="image-part-keep" title="Include this object"><input type="checkbox" data-part-enabled="${escapeHtml(region.editorKey)}" ${preference.enabled ? 'checked' : ''}></label><button type="button" data-part-select="${escapeHtml(region.editorKey)}"><i style="background:${color.color}"></i><span><strong>${escapeHtml(preference.name)}</strong><small>${boxWidth.toFixed(1)} × ${boxHeight.toFixed(1)} mm · ${Math.round(region.coverage * 100)}%</small></span></button></div>`;
+    return `<div class="image-part-row ${region.editorKey === session.selectedPartKey ? 'selected' : ''} ${preference.enabled ? '' : 'excluded'}" data-part-row="${escapeHtml(region.editorKey)}"><label class="image-part-keep" title="Include this object"><input type="checkbox" data-part-enabled="${escapeHtml(region.editorKey)}" ${preference.enabled ? 'checked' : ''}></label><button type="button" data-part-select="${escapeHtml(region.editorKey)}"><i style="background:${color.color}"></i><span><strong data-i18n-ignore>${escapeHtml(preference.name)}</strong><small>${boxWidth.toFixed(1)} × ${boxHeight.toFixed(1)} mm · ${Math.round(region.coverage * 100)}%</small></span></button></div>`;
   }).join('');
   const availableDepth = Math.max(.05, state.project.medal.baseThickness - state.project.medal.minimumFloor);
   const amountMaximum = selected.operation === 'raise' ? DESIGN_LIMITS.reliefHeightMax : availableDepth;
@@ -6854,7 +6974,7 @@ function setView(mode) {
     $('#canvasEmpty').hidden = true;
     $('#workspaceModeLabel').textContent = 'Model workspace';
     $('#workspaceModeHelp').textContent = 'Click artwork to edit · drag the blue height handle to raise or recess';
-    $('#stageHint').textContent = state.pendingInsert ? `Click the medal face to place ${state.pendingInsert.label}` : 'Drag artwork to move · drag empty space to orbit · Alt-drag through artwork to orbit';
+    $('#stageHint').textContent = state.pendingInsert ? translateUiKey('stage.placeFace', { name: state.pendingInsert.label }) : translateUiKey('stage.orbitAlt');
     requestAnimationFrame(() => { state.viewer?.resize(); ensure3DModel(); });
   } else {
     if (mode === 'toolpath') {
@@ -6868,8 +6988,8 @@ function setView(mode) {
       state.viewer?.setProjection('orthographic');
       updateProjectionToggle('orthographic');
       $('#workspaceModeLabel').textContent = 'Sketching inside the 3D model';
-      $('#workspaceModeHelp').textContent = `${state.drawing.face === 'back' ? 'Back' : 'Front'} face auto-aligned · finish to restore your camera`;
-      $('#sketchModeBar small').textContent = `${state.drawing.face === 'back' ? 'Back' : 'Front'} face · drawing is oriented from this viewing side`;
+      $('#workspaceModeHelp').textContent = translateUiKey(state.drawing.face === 'back' ? 'stage.backAutoAligned' : 'stage.frontAutoAligned');
+      $('#sketchModeBar small').textContent = translateUiKey(state.drawing.face === 'back' ? 'stage.backDrawingOrientation' : 'stage.frontDrawingOrientation');
       renderSelectionHud();
       requestAnimationFrame(() => { state.viewer?.resize(); state.viewer?.render(); resizeCanvas(); });
     }
@@ -6904,7 +7024,7 @@ function renderViewerParts(meshes) {
   $('#viewerParts').innerHTML = [...grouped.values()].map(group => {
     const filament = palette[group.slot] || palette[0];
     const grams = group.volumeMm3 / 1000 * (filament.density || 1.24);
-    return `<div class="viewer-part" data-viewer-part="${group.slot}"><input type="checkbox" data-part-visible="${group.slot}" checked aria-label="Show slot ${group.slot + 1}"/><i class="part-swatch" style="background:${filament.color}"></i><span><strong>${group.slot + 1} · ${escapeHtml(filament.name)}</strong><small>${group.volumeMm3.toFixed(0)} mm³ · ${grams.toFixed(1)} g · ${group.shells} shell${group.shells === 1 ? '' : 's'}</small></span><button data-part-solo="${group.slot}" title="Show only this color">Solo</button></div>`;
+    return `<div class="viewer-part" data-viewer-part="${group.slot}"><input type="checkbox" data-part-visible="${group.slot}" checked aria-label="${escapeHtml(translateUiKey('accessibility.showSlot', { number: formatLocalizedNumber(group.slot + 1) }))}"/><i class="part-swatch" style="background:${filament.color}"></i><span><strong>${formatLocalizedNumber(group.slot + 1)} · ${escapeHtml(filament.name)}</strong><small>${localizedFixed(group.volumeMm3, 0)} mm³ · ${localizedFixed(grams, 1)} g · ${escapeHtml(localizedCount('shell', group.shells))}</small></span><button data-part-solo="${group.slot}" title="${escapeHtml(translateUiKey('accessibility.showOnlyColor'))}">Solo</button></div>`;
   }).join('');
   $$('[data-part-visible]').forEach(input => input.addEventListener('change', () => state.viewer?.setVisibility(Number(input.dataset.partVisible), input.checked)));
   $$('[data-part-solo]').forEach(button => button.addEventListener('click', () => {
@@ -6964,7 +7084,9 @@ function updateLayerPreview() {
     if (state.sectionCache?.key !== key) state.sectionCache = { key, meshes: buildSectionCapMeshes(result, height) };
     state.viewer.setSectionMeshes(state.sectionCache.meshes);
   }
-  $('#layerLabel').textContent = layer >= max ? `All · ${max} layers` : `${layer} / ${max} · ${height.toFixed(2)} mm`;
+  $('#layerLabel').textContent = layer >= max
+    ? translateUiKey('dynamicUi.allCount', { count: localizedCount('layer', max) })
+    : translateUiKey('status.layerOf', { current: formatLocalizedNumber(layer), total: formatLocalizedNumber(max), height: localizedFixed(height) });
 }
 
 function renderModelStats(meshes, bounds, cell = meshCellForProject(state.project), maxHeight = bounds.maxZ) {
@@ -6976,14 +7098,14 @@ function renderModelStats(meshes, bounds, cell = meshCellForProject(state.projec
   const height = Number(maxHeight || bounds.maxZ || approximateMaxHeight());
   const layers = Math.ceil(height / state.project.profile.layerHeight);
   $('#modelStats').innerHTML = [
-    ['Size', `${width.toFixed(1)} × ${depth.toFixed(1)} × ${height.toFixed(1)} mm`],
-    ['Mesh', `${Math.round(triangles).toLocaleString()} triangles`],
-    ['Surface sample', `${cell.toFixed(3)} mm`],
-    ['Model volume', `${(volume / 1000).toFixed(1)} cm³`],
-    ['Model mass', `${grams.toFixed(1)} g`],
+    ['Size', `${localizedFixed(width, 1)} × ${localizedFixed(depth, 1)} × ${localizedFixed(height, 1)} mm`],
+    ['Mesh', localizedCount('triangle', Math.round(triangles))],
+    ['Surface sample', `${localizedFixed(cell, 3)} mm`],
+    ['Model volume', `${localizedFixed(volume / 1000, 1)} cm³`],
+    ['Model mass', `${localizedFixed(grams, 1)} g`],
   ].map(([label, value]) => `<div class="model-stat"><small>${label}</small><strong>${value}</strong></div>`).join('');
   const colorParts = new Set(meshes.map(mesh => mesh.slot)).size;
-  $('#modelPartCount').textContent = `${colorParts} color${colorParts === 1 ? '' : 's'} · ${meshes.length} shell${meshes.length === 1 ? '' : 's'} · ${layers} layers`;
+  $('#modelPartCount').textContent = `${localizedCount('color', colorParts)} · ${localizedCount('shell', meshes.length)} · ${localizedCount('layer', layers)}`;
   const slider = $('#layerSlider'); slider.max = String(layers); slider.value = String(layers); updateLayerPreview();
   state.viewerStats = { triangles, volume, grams, width, depth, height, layers };
 }
@@ -7219,11 +7341,9 @@ function bindViewerControls() {
     state.selectedId = hit?.id || null;
     renderInspector();
     renderSelectionHud();
-    if (hit) $('#stageHint').textContent = hit.face === 'back'
-      ? `${hit.name} selected · flat first-layer color · drag the handles to move, scale, or rotate`
-    : `${hit.name} selected · drag the blue height handle up to raise or down to recess`;
-    else if (surfaceHit?.surface?.face === 'bottom') $('#stageHint').textContent = 'Back face · artwork placed here is readable from the back and embedded flush in the first layer';
-    else if (surfaceHit?.surface?.face === 'side') $('#stageHint').textContent = 'Medal edge · rotate freely; artwork can currently be placed on the front or back';
+    if (hit) $('#stageHint').textContent = translateUiKey(hit.face === 'back' ? 'stage.selectedBack' : 'stage.selectedFront', { name: hit.name });
+    else if (surfaceHit?.surface?.face === 'bottom') $('#stageHint').textContent = translateUiKey('stage.backSurface');
+    else if (surfaceHit?.surface?.face === 'side') $('#stageHint').textContent = translateUiKey('stage.edgeSurface');
   });
   modelCanvas.addEventListener('pointercancel', event => {
     if (state.modelDrag?.pointerId === event.pointerId) {
@@ -7247,7 +7367,7 @@ function bindViewerControls() {
     renderInspector(); renderSelectionHud();
     const input = $('#selectionHud [data-inline-text-editor]');
     input?.focus(); input?.select();
-    $('#stageHint').textContent = `Editing “${hit.text}” · type replacement text, then press Enter or click away`;
+    $('#stageHint').textContent = translateUiKey('stage.editingText', { text: hit.text });
   });
   modelCanvas.addEventListener('pointerleave', () => {
     if (state.modelDrag || state.gizmoDrag) return;
@@ -7447,6 +7567,15 @@ function bindStaticEvents() {
   $('#assetInput').addEventListener('change',event=>{if(event.target.files[0])handleAssetFile(event.target.files[0]);});$('#projectInput').addEventListener('change',event=>{if(event.target.files[0])handleProjectFile(event.target.files[0]);});
   $('#projectNameInput').addEventListener('focus',()=>{state.inspectorEditStart=snapshot();});$('#projectNameInput').addEventListener('input',event=>{state.project.name=event.target.value;state.project.template='custom';$('#undoButton').disabled=false;$('#redoButton').disabled=true;markSavePending();});$('#projectNameInput').addEventListener('change',()=>{state.project=normalizeProject(state.project);pushHistory(state.inspectorEditStart);state.inspectorEditStart=null;renderAll({panel:true});});
   window.addEventListener('resize',()=>{resizeCanvas();state.viewer?.resize();renderPushPullGizmo();renderTransformGizmo();});
+  window.addEventListener(LANGUAGE_CHANGE_EVENT, () => {
+    renderLocalizedWorkspaceChrome();
+    renderAll({ panel: true });
+    if (state.viewerResult?.meshes?.length && state.viewerResult?.bounds) {
+      renderModelStats(state.viewerResult.meshes, state.viewerResult.bounds, state.viewerResult.cell, state.viewerResult.maxHeight);
+    }
+    if (dialog.open) localizeSubtree(dialog);
+    localizeSubtree(document.body);
+  });
   window.addEventListener('pagehide', () => { clearTimeout(state.saveTimer); if (state.saveDirty) void persistProject(); });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && state.saveDirty) { clearTimeout(state.saveTimer); void persistProject(); } });
   window.addEventListener('beforeunload', event => { state.cloudImageAbortController?.abort(); if (state.saveDirty) { event.preventDefault(); event.returnValue = ''; } });
@@ -7492,6 +7621,7 @@ function bindStaticEvents() {
 }
 
 async function initialize() {
+  renderLocalizedWorkspaceChrome();
   const storedInventory = state.qaMode ? null : await loadRecord('inventory','catalog',null);
   state.inventory = state.qaMode
     ? normalizeInventory(DEFAULT_INVENTORY)

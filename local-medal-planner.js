@@ -14,8 +14,9 @@ const RESPONSE_LIMIT_BYTES = 256 * 1024;
 const MIN_FREE_MEMORY_BYTES = 768 * 1024 ** 2;
 const MAX_BRIEF_LENGTH = 2_000;
 const MAX_MODEL_TOKENS = 1_200;
-const REQUEST_FIELDS = new Set(['brief', 'manufacturing', 'preferModel']);
+const REQUEST_FIELDS = new Set(['brief', 'locale', 'manufacturing', 'preferModel']);
 const MANUFACTURING_FIELDS = new Set(['nozzle', 'layerHeight', 'baseThickness', 'reliefHeight', 'maxElements']);
+const SUPPORTED_LOCALES = new Set(['en', 'sk', 'cs', 'de', 'pl']);
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '[::1]', '::1', 'localhost']);
 
 const PLAN_JSON_SCHEMA = Object.freeze({
@@ -112,6 +113,14 @@ function normalizeManufacturing(value) {
   return { ...value };
 }
 
+function normalizeRequestLocale(value) {
+  if (value === undefined || value === null || value === '') return undefined;
+  const requested = String(value).toLowerCase().split(/[-_]/u)[0];
+  const locale = requested === 'cz' ? 'cs' : requested;
+  if (!SUPPORTED_LOCALES.has(locale)) throw new LocalMedalPlanError('INVALID_LOCALE', 'Choose a supported application language.', { status: 400 });
+  return locale;
+}
+
 export function validateMedalPlanRequest(input) {
   if (!input || Array.isArray(input) || typeof input !== 'object') {
     throw new LocalMedalPlanError('INVALID_JSON', 'Medal generation settings must be a JSON object.', { status: 400 });
@@ -123,6 +132,7 @@ export function validateMedalPlanRequest(input) {
   }
   return {
     brief: cleanBrief(input.brief),
+    locale: normalizeRequestLocale(input.locale),
     manufacturing: normalizeManufacturing(input.manufacturing),
     preferModel: input.preferModel !== false,
   };
@@ -155,7 +165,7 @@ export function resolveLocalMedalPlannerConfig(env = process.env) {
 }
 
 function deterministicResult(request, reason = null) {
-  const plan = parseMedalBrief(request.brief, { manufacturing: request.manufacturing });
+  const plan = parseMedalBrief(request.brief, { locale: request.locale, manufacturing: request.manufacturing });
   return {
     plan,
     generation: {
@@ -172,6 +182,7 @@ function modelSystemPrompt() {
     'You are the private local planning stage of a 3D-printable medal editor.',
     'Return only one MedalDesignPlan JSON object matching the supplied JSON schema.',
     'Extract concise event identity, choose a visually coherent motif, palette, body, rim and ribbon attachment.',
+    'Write event wording, variant labels and descriptions in the requested language and preserve native diacritics.',
     'Do not return images, prose, Markdown, coordinates, mesh data, URLs, scripts, or the user request verbatim.',
     'Every variant must be practical for FDM printing. The back is always flat and multicolor inlay only.',
     'Prefer strong visual hierarchy, limited colors, broad negative space and intentional relief levels.',
@@ -194,6 +205,7 @@ function modelRequestBody(config, request, baseline) {
         role: 'user',
         content: JSON.stringify({
           task: 'Plan four polished editable medal directions.',
+          requestedLanguage: request.locale || 'detect from the brief',
           brief: request.brief,
           lockedManufacturing: baseline.manufacturing,
           deterministicExtraction: baseline.event,

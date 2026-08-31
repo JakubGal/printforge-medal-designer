@@ -52,6 +52,10 @@ button:disabled { cursor: not-allowed; opacity: .48; transform: none !important;
 .save-label-short, .export-label-short { display: none; }
 .mode-pill { display: flex; align-items: center; gap: 7px; padding: 8px 11px; border-radius: 99px; background: #edf5e7; color: #38603c; font-size: 12px; font-weight: 650; }
 .mode-pill i, .compute-chip span { width: 7px; height: 7px; background: var(--pass); border-radius: 50%; box-shadow: 0 0 0 4px rgba(28,163,109,.12); }
+.language-switcher { display: inline-flex; min-height: 38px; align-items: center; gap: 4px; padding: 0 6px 0 9px; border: 1px solid var(--line); border-radius: 11px; color: #4f5a56; background: var(--surface); box-shadow: 0 2px 7px rgba(30,35,32,.04); }
+.language-switcher > span { font-size: 13px; line-height: 1; }
+.language-switcher select { width: 38px; min-height: 34px; padding: 0 2px; border: 0; outline: 0; color: var(--ink); background: transparent; cursor: pointer; font-size: 10px; font-weight: 850; letter-spacing: .04em; }
+.language-switcher:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(49,95,244,.12); }
 .save-state { min-width: 76px; padding: 7px 2px; border: 0; border-radius: 7px; color: var(--muted); background: transparent; font-size: 10px; text-align: right; cursor: pointer; }
 .save-state:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
 .save-state.saving { color: var(--warn); }
@@ -1072,6 +1076,7 @@ dialog.guide-library-dialog { width: min(1080px, calc(100vw - 32px)); }
 
 @media (max-width: 1450px) {
   .workspace { grid-template-columns: 68px 280px minmax(380px,1fr); }
+  .mode-pill, .save-state { display: none; }
   #saveButton { display: none; }
   #helpButton { display: inline-grid; place-items: center; width: 40px; min-width: 40px; height: 40px; padding: 0; }
   .help-label-full { display: none; }
@@ -1094,6 +1099,9 @@ dialog.guide-library-dialog { width: min(1080px, calc(100vw - 32px)); }
   .app-shell { height: 100svh; grid-template-rows: 62px minmax(0, 1fr) 112px; min-height: 0; }
   .topbar { position: sticky; top: 0; grid-template-columns: auto minmax(72px, 1fr) auto; gap: 9px; padding: 0 14px; }
   .mode-pill, .save-state, .top-actions .secondary { display: none; }
+  .language-switcher { min-height: 40px; padding-inline: 6px; }
+  .language-switcher > span { display: none; }
+  .language-switcher select { width: 34px; min-height: 38px; text-align: center; }
   .project-title { display: flex; min-width: 0; padding-left: 0; border-left: 0; }
   .project-title .eyebrow { display: none; }
   .project-title input { width: 100%; min-width: 0; padding: 7px 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); font-size: 11px; text-overflow: ellipsis; }

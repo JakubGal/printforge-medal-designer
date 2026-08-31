@@ -29,6 +29,9 @@ function normalizedRequest(options = {}) {
     throw new OpenAiMedalProviderError(`Keep the medal description under ${MAX_BRIEF_LENGTH.toLocaleString('en-US')} characters.`, { code: 'BRIEF_TOO_LONG' });
   }
   const request = { brief };
+  const requestedLocale = String(options.locale || '').toLowerCase().split(/[-_]/u)[0];
+  const locale = requestedLocale === 'cz' ? 'cs' : requestedLocale;
+  if (['en', 'sk', 'cs', 'de', 'pl'].includes(locale)) request.locale = locale;
   for (const field of REQUEST_FIELDS) {
     if (options[field] !== undefined && options[field] !== null && options[field] !== '') request[field] = options[field];
   }

@@ -17,8 +17,14 @@ const PDF_HEIGHT_PT = 595.28;
 const encoder = new TextEncoder();
 
 function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
-function money(value) { return `Kč ${Math.round(Number(value) || 0).toLocaleString('cs-CZ')}`; }
-function mm(value, digits = 1) { return `${Number(value || 0).toFixed(digits)} mm`; }
+function translated(options, value) {
+  return typeof options?.translate === 'function' ? options.translate(String(value ?? '')) : String(value ?? '');
+}
+function localizedNumber(value, digits = 0, localeTag = 'en-GB') {
+  return new Intl.NumberFormat(localeTag, { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(Number(value) || 0);
+}
+function money(value, localeTag = 'en-GB') { return `Kč ${localizedNumber(Math.round(Number(value) || 0), 0, localeTag)}`; }
+function mm(value, digits = 1, localeTag = 'en-GB') { return `${localizedNumber(value, digits, localeTag)} mm`; }
 
 function roundedRect(context, x, y, width, height, radius = 24) {
   context.beginPath();
@@ -211,7 +217,7 @@ function orthographicFaceLayout(project) {
  * by the production export. Keeping this as a crop of projectToSvg avoids a
  * second, report-only interpretation of text, paths, colors, or the rim.
  */
-export function projectFaceToTechnicalSvg(project, face = 'front') {
+export function projectFaceToTechnicalSvg(project, face = 'front', options = {}) {
   const selectedFace = face === 'back' ? 'back' : 'front';
   // Element coordinates are authored in an upright, readable face workspace.
   // The production compiler reflects back-face geometry into the build plane,
@@ -241,9 +247,13 @@ export function projectFaceToTechnicalSvg(project, face = 'front') {
   if (selectedFace === 'back') {
     group = group
       .replace('data-artboard-face="front"', 'data-artboard-face="back"')
-      .replace('<title>Front face</title>', '<title>Reverse face · ribbon-up outside view</title>')
-      .replace('>FRONT</text>', '>REVERSE · OUTSIDE VIEW</text>')
+      .replace('<title>Front face</title>', `<title>${translated(options, 'Reverse · outside-facing · readable')}</title>`)
+      .replace('>FRONT</text>', `>${translated(options, 'REVERSE · OUTSIDE VIEW')}</text>`)
       .replaceAll('data-face="front"', 'data-face="back"');
+  } else {
+    group = group
+      .replace('<title>Front face</title>', `<title>${translated(options, 'Front face')}</title>`)
+      .replace('>FRONT</text>', `>${translated(options, 'FRONT')}</text>`);
   }
   const layout = orthographicFaceLayout(project);
   const pixelWidth = Math.max(900, Math.ceil(layout.width * 20));
@@ -319,7 +329,7 @@ function drawDimensionArrow(context, x0, y0, x1, y1, label, options = {}) {
   context.restore();
 }
 
-function drawSideProfile(context, model, x, y, width, height) {
+function drawSideProfile(context, model, x, y, width, height, options = {}) {
   const medal = model.project.medal;
   const baseColor = model.project.palette[medal.baseColor]?.color || '#252d2a';
   const rimColor = model.project.palette[medal.rimColor]?.color || baseColor;
@@ -335,15 +345,15 @@ function drawSideProfile(context, model, x, y, width, height) {
   roundedRect(context, slabX, centerY - basePx / 2 - reliefPx, slabWidth * .13, reliefPx + 7, 6); context.fill();
   roundedRect(context, slabX + slabWidth * .87, centerY - basePx / 2 - reliefPx, slabWidth * .13, reliefPx + 7, 6); context.fill();
   context.strokeStyle = '#131c18'; context.lineWidth = 2; roundedRect(context, slabX, centerY - basePx / 2, slabWidth, basePx, 10); context.stroke();
-  drawDimensionArrow(context, slabX, centerY + basePx / 2 + 42, slabX + slabWidth, centerY + basePx / 2 + 42, mm(model.dimensions.faceWidth));
-  drawDimensionArrow(context, slabX - 36, centerY + basePx / 2, slabX - 36, centerY - basePx / 2 - reliefPx, mm(model.dimensions.depth));
-  uppercaseLabel(context, 'Side profile · schematic', x + 26, y + 42);
-  text(context, `${mm(medal.baseThickness)} body · ${mm(medal.rimHeight)} raised edge`, x + 26, y + height - 28, 20, { color: '#68736e' });
+  drawDimensionArrow(context, slabX, centerY + basePx / 2 + 42, slabX + slabWidth, centerY + basePx / 2 + 42, mm(model.dimensions.faceWidth, 1, options.localeTag));
+  drawDimensionArrow(context, slabX - 36, centerY + basePx / 2, slabX - 36, centerY - basePx / 2 - reliefPx, mm(model.dimensions.depth, 1, options.localeTag));
+  uppercaseLabel(context, translated(options, 'Side profile · schematic'), x + 26, y + 42);
+  text(context, translated(options, `${mm(medal.baseThickness, 1, options.localeTag)} body · ${mm(medal.rimHeight, 1, options.localeTag)} raised edge`), x + 26, y + height - 28, 20, { color: '#68736e' });
   context.restore();
 }
 
-function drawPaletteTable(context, model, x, y, width, height) {
-  uppercaseLabel(context, 'Materials & color bodies', x + 26, y + 42);
+function drawPaletteTable(context, model, x, y, width, height, options = {}) {
+  uppercaseLabel(context, translated(options, 'Materials & color bodies'), x + 26, y + 42);
   const rows = model.materials.slice(0, 7);
   const rowHeight = Math.min(61, (height - 70) / Math.max(1, rows.length));
   rows.forEach((row, index) => {
@@ -351,8 +361,8 @@ function drawPaletteTable(context, model, x, y, width, height) {
     if (index) { context.strokeStyle = '#e4e8e3'; context.lineWidth = 2; context.beginPath(); context.moveTo(x + 24, rowY - 12); context.lineTo(x + width - 24, rowY - 12); context.stroke(); }
     context.fillStyle = row.color; roundedRect(context, x + 26, rowY, 34, 34, 8); context.fill();
     text(context, `${row.slot + 1} · ${row.name}`, x + 76, rowY + 16, 20, { weight: 800, maxWidth: width - 300 });
-    text(context, `${row.material} · ${row.effect}${row.roles.length ? ` · ${row.roles.join(' + ')}` : ''}`, x + 76, rowY + 39, 16, { color: '#68736e', maxWidth: width - 300 });
-    const amount = row.grams === null ? 'estimated use' : `${row.grams.toFixed(1)} g`;
+    text(context, `${row.material} · ${row.effect}${row.roles.length ? ` · ${row.roles.map(role => translated(options, role)).join(' + ')}` : ''}`, x + 76, rowY + 39, 16, { color: '#68736e', maxWidth: width - 300 });
+    const amount = row.grams === null ? translated(options, 'estimated use') : `${localizedNumber(row.grams, 1, options.localeTag)} g`;
     text(context, amount, x + width - 28, rowY + 25, 19, { align: 'right', weight: 800, color: '#3854b8' });
   });
 }
@@ -364,87 +374,87 @@ export async function renderTechnicalSheetCanvas(model, options = {}) {
   const context = canvas.getContext('2d');
   context.fillStyle = '#f1f4f0'; context.fillRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT);
   const [frontImage, backImage] = await Promise.all([
-    imageFromSvg(projectFaceToTechnicalSvg(model.project, 'front')),
-    imageFromSvg(projectFaceToTechnicalSvg(model.project, 'back')),
+    imageFromSvg(projectFaceToTechnicalSvg(model.project, 'front', options)),
+    imageFromSvg(projectFaceToTechnicalSvg(model.project, 'back', options)),
   ]);
   const viewImage = await imageFromSource(options.viewDataUrl).catch(() => null);
 
   context.fillStyle = '#17201c'; context.fillRect(0, 0, PAGE_WIDTH, 174);
   context.fillStyle = '#d9f36a'; roundedRect(context, 80, 47, 70, 70, 18); context.fill();
   text(context, 'M', 115, 84, 36, { align: 'center', baseline: 'middle', weight: 900, color: '#17201c' });
-  uppercaseLabel(context, 'MedalForge · technical & quote sheet', 180, 68, { color: '#aab4ae', size: 20 });
+  uppercaseLabel(context, translated(options, 'MedalForge · technical & quote sheet'), 180, 68, { color: '#aab4ae', size: 20 });
   text(context, model.project.name, 180, 121, 43, { color: '#ffffff', weight: 800, maxWidth: 1420 });
-  text(context, `PROJECT ${model.hash}`, PAGE_WIDTH - 80, 76, 20, { align: 'right', color: '#aab4ae', weight: 800 });
-  text(context, model.generatedAt.toLocaleString('cs-CZ'), PAGE_WIDTH - 80, 116, 19, { align: 'right', color: '#ffffff', weight: 600 });
+  text(context, translated(options, `PROJECT ${model.hash}`), PAGE_WIDTH - 80, 76, 20, { align: 'right', color: '#aab4ae', weight: 800 });
+  text(context, model.generatedAt.toLocaleString(options.localeTag || 'en-GB'), PAGE_WIDTH - 80, 116, 19, { align: 'right', color: '#ffffff', weight: 600 });
 
   card(context, 72, 214, 1510, 852);
-  uppercaseLabel(context, 'Orthographic artwork · front and back', 106, 262);
-  text(context, 'Two independent outside-facing views from the exact editable design. Reverse lettering is intentionally readable, never mirrored.', 106, 296, 20, { color: '#68736e', maxWidth: 1380 });
+  uppercaseLabel(context, translated(options, 'Orthographic artwork · front and back'), 106, 262);
+  text(context, translated(options, 'Two independent outside-facing views from the exact editable design. Reverse lettering is intentionally readable, never mirrored.'), 106, 296, 20, { color: '#68736e', maxWidth: 1380 });
   context.strokeStyle = '#e0e5e0'; context.lineWidth = 2; context.beginPath(); context.moveTo(827, 330); context.lineTo(827, 1028); context.stroke();
-  uppercaseLabel(context, 'Front face', 112, 346, { color: '#3854b8', size: 18 });
-  text(context, model.faces.front.caption, 112, 376, 18, { color: '#53605a', weight: 700, maxWidth: 680 });
+  uppercaseLabel(context, translated(options, 'Front face'), 112, 346, { color: '#3854b8', size: 18 });
+  text(context, translated(options, model.faces.front.caption), 112, 376, 18, { color: '#53605a', weight: 700, maxWidth: 680 });
   fitImage(context, frontImage, 96, 388, 716, 640, 10);
-  uppercaseLabel(context, 'Reverse · outside-facing · readable', 852, 346, { color: '#3854b8', size: 18 });
-  text(context, model.faces.back.caption, 852, 376, 18, { color: '#53605a', weight: 700, maxWidth: 680 });
+  uppercaseLabel(context, translated(options, 'Reverse · outside-facing · readable'), 852, 346, { color: '#3854b8', size: 18 });
+  text(context, translated(options, model.faces.back.caption), 852, 376, 18, { color: '#53605a', weight: 700, maxWidth: 680 });
   fitImage(context, backImage, 836, 388, 716, 640, 10);
 
   card(context, 72, 1104, 740, 500);
-  uppercaseLabel(context, 'Isometric product view', 104, 1150);
+  uppercaseLabel(context, translated(options, 'Isometric product view'), 104, 1150);
   if (viewImage) fitForegroundImage(context, viewImage, 92, 1170, 700, 405, 14);
   else {
-    text(context, '3D view unavailable', 442, 1350, 26, { align: 'center', color: '#8b9690', weight: 700 });
-    text(context, 'The orthographic and dimensional views remain authoritative.', 442, 1390, 17, { align: 'center', color: '#8b9690' });
+    text(context, translated(options, '3D view unavailable'), 442, 1350, 26, { align: 'center', color: '#8b9690', weight: 700 });
+    text(context, translated(options, 'The orthographic and dimensional views remain authoritative.'), 442, 1390, 17, { align: 'center', color: '#8b9690' });
   }
-  text(context, 'Rendered locally from the same printable geometry used for export.', 104, 1575, 18, { color: '#68736e' });
+  text(context, translated(options, 'Rendered locally from the same printable geometry used for export.'), 104, 1575, 18, { color: '#68736e' });
 
   card(context, 842, 1104, 740, 500);
-  drawSideProfile(context, model, 842, 1104, 740, 500);
+  drawSideProfile(context, model, 842, 1104, 740, 500, options);
 
   card(context, 1618, 214, 790, 266, { fill: '#ffffff' });
-  uppercaseLabel(context, `Quote · ${model.quantity} piece${model.quantity === 1 ? '' : 's'}`, 1652, 262);
-  text(context, money(model.quote.total), 1652, 342, 54, { weight: 900 });
-  text(context, `${money(model.quote.unit)} per medal`, 1652, 382, 24, { color: '#3854b8', weight: 800 });
-  text(context, `${model.quote.gramsPerPiece.toFixed(1)} g · ${Math.round(model.quote.minutesPerPiece)} min estimated machine time`, 1652, 430, 18, { color: '#68736e' });
-  text(context, model.exactGeometry ? 'Weight from compiled material meshes' : 'Weight from dimensional estimate', 2372, 430, 16, { align: 'right', color: '#68736e', weight: 700 });
+  uppercaseLabel(context, translated(options, `Quote · ${model.quantity} piece${model.quantity === 1 ? '' : 's'}`), 1652, 262);
+  text(context, money(model.quote.total, options.localeTag), 1652, 342, 54, { weight: 900 });
+  text(context, translated(options, `${money(model.quote.unit, options.localeTag)} per medal`), 1652, 382, 24, { color: '#3854b8', weight: 800 });
+  text(context, translated(options, `${localizedNumber(model.quote.gramsPerPiece, 1, options.localeTag)} g · ${localizedNumber(Math.round(model.quote.minutesPerPiece), 0, options.localeTag)} min estimated machine time`), 1652, 430, 18, { color: '#68736e' });
+  text(context, translated(options, model.exactGeometry ? 'Weight from compiled material meshes' : 'Weight from dimensional estimate'), 2372, 430, 16, { align: 'right', color: '#68736e', weight: 700 });
 
   card(context, 1618, 512, 790, 228);
-  uppercaseLabel(context, 'Overall dimensions', 1652, 560);
+  uppercaseLabel(context, translated(options, 'Overall dimensions'), 1652, 560);
   const metrics = [
-    ['Width', mm(model.dimensions.width)], ['Height', mm(model.dimensions.height)], ['Max depth', mm(model.dimensions.depth, 2)],
-    ['Face', `${mm(model.dimensions.faceWidth)} × ${mm(model.dimensions.faceHeight)}`], ['Attachment', model.attachment.label], ['Edge', `${RIM_STYLE_INFO[model.project.medal.rimStyle]?.label || model.project.medal.rimStyle} · ${mm(model.project.medal.rimWidth)}`],
+    ['Width', mm(model.dimensions.width, 1, options.localeTag)], ['Height', mm(model.dimensions.height, 1, options.localeTag)], ['Max depth', mm(model.dimensions.depth, 2, options.localeTag)],
+    ['Face', `${mm(model.dimensions.faceWidth, 1, options.localeTag)} × ${mm(model.dimensions.faceHeight, 1, options.localeTag)}`], ['Attachment', translated(options, model.attachment.label)], ['Edge', `${translated(options, RIM_STYLE_INFO[model.project.medal.rimStyle]?.label || model.project.medal.rimStyle)} · ${mm(model.project.medal.rimWidth, 1, options.localeTag)}`],
   ];
   metrics.forEach(([label, value], index) => {
     const column = index % 3, row = Math.floor(index / 3);
     const metricX = 1652 + column * 244, metricY = 602 + row * 74;
-    uppercaseLabel(context, label, metricX, metricY, { size: 15 });
+    uppercaseLabel(context, translated(options, label), metricX, metricY, { size: 15 });
     text(context, value, metricX, metricY + 28, 20, { weight: 800, maxWidth: 218 });
   });
 
   card(context, 1618, 772, 790, 252);
-  uppercaseLabel(context, 'Print profile & quantity ladder', 1652, 820);
-  text(context, `${model.project.profile.nozzle.toFixed(1)} mm nozzle`, 1652, 861, 21, { weight: 800 });
-  text(context, `${model.project.profile.layerHeight.toFixed(2)} mm layers · ${model.project.profile.meshQuality} mesh`, 1880, 861, 21, { weight: 800 });
-  text(context, `${model.project.paletteIds.length} configured colors · ${model.materials.length} used`, 1652, 900, 18, { color: '#68736e' });
+  uppercaseLabel(context, translated(options, 'Print profile & quantity ladder'), 1652, 820);
+  text(context, translated(options, `${localizedNumber(model.project.profile.nozzle, 1, options.localeTag)} mm nozzle`), 1652, 861, 21, { weight: 800 });
+  text(context, translated(options, `${localizedNumber(model.project.profile.layerHeight, 2, options.localeTag)} mm layers · ${model.project.profile.meshQuality} mesh`), 1880, 861, 21, { weight: 800 });
+  text(context, translated(options, `${model.project.paletteIds.length} configured colors · ${model.materials.length} used`), 1652, 900, 18, { color: '#68736e' });
   const ladderY = 942;
   model.quoteTiers.forEach((tier, index) => {
     const ladderX = 1652 + index * 143;
     text(context, `${tier.quantity}×`, ladderX, ladderY, 16, { color: '#68736e', weight: 800 });
-    text(context, money(tier.unit), ladderX, ladderY + 28, 18, { weight: 900 });
+    text(context, money(tier.unit, options.localeTag), ladderX, ladderY + 28, 18, { weight: 900 });
   });
 
   card(context, 1618, 1056, 790, 360);
-  drawPaletteTable(context, model, 1618, 1056, 790, 360);
+  drawPaletteTable(context, model, 1618, 1056, 790, 360, options);
 
   card(context, 1618, 1448, 790, 156, { fill: model.checks.length ? '#fff8e8' : '#edf7ed', stroke: false, shadow: false });
-  uppercaseLabel(context, model.checks.length ? 'Manufacturing notes' : 'Manufacturing preflight', 1652, 1492, { color: model.checks.length ? '#8a6725' : '#397349' });
+  uppercaseLabel(context, translated(options, model.checks.length ? 'Manufacturing notes' : 'Manufacturing preflight'), 1652, 1492, { color: model.checks.length ? '#8a6725' : '#397349' });
   const note = model.checks.length
-    ? model.checks.map(check => `${check.title}: ${check.message}`).join('  •  ')
-    : 'No current blockers or cautions. Final slicer preview and a tested printer profile are still required before production.';
+    ? model.checks.map(check => `${translated(options, check.title)}: ${translated(options, check.message)}`).join('  •  ')
+    : translated(options, 'No current blockers or cautions. Final slicer preview and a tested printer profile are still required before production.');
   wrapText(context, note, 1652, 1530, 720, 25, { size: 17, maxLines: 3, color: model.checks.length ? '#725a2a' : '#397349', weight: 600 });
 
   context.strokeStyle = '#d7ddd7'; context.lineWidth = 2; context.beginPath(); context.moveTo(72, 1650); context.lineTo(PAGE_WIDTH - 72, 1650); context.stroke();
-  text(context, 'ESTIMATE · Confirm final time, purge, support, tax, ribbon, packaging, and shipping in the production slicer and order review.', 72, 1694, 17, { color: '#68736e', weight: 700, maxWidth: 1800 });
-  text(context, 'Generated locally · no design uploaded', PAGE_WIDTH - 72, 1694, 17, { align: 'right', color: '#3854b8', weight: 800 });
+  text(context, translated(options, 'ESTIMATE · Confirm final time, purge, support, tax, ribbon, packaging, and shipping in the production slicer and order review.'), 72, 1694, 17, { color: '#68736e', weight: 700, maxWidth: 1800 });
+  text(context, translated(options, 'Generated locally · no design uploaded'), PAGE_WIDTH - 72, 1694, 17, { align: 'right', color: '#3854b8', weight: 800 });
   return canvas;
 }
 

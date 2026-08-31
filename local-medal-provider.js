@@ -8,6 +8,7 @@ export const LOCAL_MEDAL_PLAN_ENDPOINTS = Object.freeze({
 const MAX_BRIEF_LENGTH = 2_000;
 const MAX_RESPONSE_BYTES = 512 * 1024;
 const MANUFACTURING_FIELDS = new Set(['nozzle', 'layerHeight', 'baseThickness', 'reliefHeight', 'maxElements']);
+const SUPPORTED_LOCALES = new Set(['en', 'sk', 'cs', 'de', 'pl']);
 
 export class LocalMedalProviderError extends Error {
   constructor(message, options = {}) {
@@ -31,8 +32,11 @@ function cleanRequest(options) {
     if (unknown) throw new LocalMedalProviderError(`Unsupported manufacturing setting: ${unknown}.`, { code: 'UNKNOWN_FIELD' });
     manufacturing = Object.fromEntries(Object.entries(options.manufacturing).filter(([, value]) => typeof value === 'number' && Number.isFinite(value)));
   }
+  const requestedLocale = String(options.locale || '').toLowerCase().split(/[-_]/u)[0];
+  const locale = requestedLocale === 'cz' ? 'cs' : requestedLocale;
   return {
     brief,
+    ...(SUPPORTED_LOCALES.has(locale) ? { locale } : {}),
     ...(manufacturing ? { manufacturing } : {}),
     preferModel: options.preferModel !== false,
   };
@@ -40,7 +44,7 @@ function cleanRequest(options) {
 
 function deterministic(request, reason) {
   return {
-    plan: parseMedalBrief(request.brief, { manufacturing: request.manufacturing }),
+    plan: parseMedalBrief(request.brief, { locale: request.locale, manufacturing: request.manufacturing }),
     metadata: { provider: 'deterministic-local', enhanced: false, fallback: Boolean(reason), ...(reason ? { reason } : {}) },
   };
 }

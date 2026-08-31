@@ -56,3 +56,20 @@ test('preview generation is deterministic and never mutates its project', () => 
   assert.match(first, /role="img"/);
   assert.match(first, /Exact|shield medal/i);
 });
+
+test('preview labels accept localized number and message formatters', () => {
+  const project = projectFor('circle', 'single');
+  const messages = {
+    overall: '{size} celkovo',
+    ribbonOpening: '{size} otvor na stuhu',
+    ribbonHole: '{size} kruhový otvor na stuhu',
+    noRibbonOpening: 'Bez otvoru na stuhu',
+  };
+  const options = {
+    formatNumber: value => String(value).replace('.', ','),
+    formatMessage: (key, variables = {}) => messages[key].replace(/\{(\w+)\}/gu, (_, name) => variables[name]),
+  };
+  assert.equal(medalOverallSizeLabel(project, options), '60 × 66 mm celkovo');
+  assert.equal(attachmentOpeningLabel(project, options), '27 × 3,6 mm otvor na stuhu');
+  assert.match(medalTopViewSvg(project, options), />Ø 60 mm<\/text>/u);
+});

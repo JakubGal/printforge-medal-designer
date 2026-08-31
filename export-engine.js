@@ -674,9 +674,9 @@ async function buildZipBlob(files, mimeType) {
   return new Blob([...locals, ...centrals, end], { type: mimeType });
 }
 
-async function* model3mfChunks(project, meshes, palette) {
+async function* model3mfChunks(project, meshes, palette, locale = 'en-US') {
   const materialXml = palette.map(filament => `<base name="${escapeXml(`${filament.name} (${filament.material})`)}" displaycolor="#${filament.color.replace('#','').toUpperCase()}FF"/>`).join('');
-  yield `<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><metadata name="Title">${escapeXml(project.name)}</metadata><metadata name="Designer">MedalForge</metadata><metadata name="Description">Multicolor printable medal; assign each named object to its matching filament slot.</metadata><resources><basematerials id="1">${materialXml}</basematerials>`;
+  yield `<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter" xml:lang="${escapeXml(locale)}" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><metadata name="Title">${escapeXml(project.name)}</metadata><metadata name="Designer">MedalForge</metadata><metadata name="Description">Multicolor printable medal; assign each named object to its matching filament slot.</metadata><resources><basematerials id="1">${materialXml}</basematerials>`;
   for (let meshIndex = 0; meshIndex < meshes.length; meshIndex += 1) {
     const mesh = meshes[meshIndex], objectId = meshIndex + 2;
     const triangleCount = mesh.triangles.length / 9;
@@ -728,11 +728,12 @@ async function* model3mfChunks(project, meshes, palette) {
   yield `</resources><build>${meshes.map((_, index) => `<item objectid="${index + 2}"/>`).join('')}</build></model>`;
 }
 
-export async function meshesTo3mf(project, meshes) {
+export async function meshesTo3mf(project, meshes, options = {}) {
   assertExportBudget(meshes, '3mf');
   const palette = exportPalette(project);
   assertMeshPaletteSlots(meshes, palette);
   const medal = project.medal || {};
+  const locale = /^[a-z]{2}(?:-[A-Z]{2})?$/u.test(String(options.locale || '')) ? String(options.locale) : 'en-US';
   const contentTypes = `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/><Default Extension="json" ContentType="application/json"/></Types>`;
   const relationships = `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>`;
   const manifest = JSON.stringify({
@@ -753,7 +754,7 @@ export async function meshesTo3mf(project, meshes) {
   return buildZipBlob([
     { name: '[Content_Types].xml', data: contentTypes },
     { name: '_rels/.rels', data: relationships },
-    { name: '3D/3dmodel.model', data: () => model3mfChunks(project, meshes, palette), compress: triangleCount >= 10_000 },
+    { name: '3D/3dmodel.model', data: () => model3mfChunks(project, meshes, palette, locale), compress: triangleCount >= 10_000 },
     { name: 'Metadata/medalforge-manifest.json', data: manifest },
   ], 'model/3mf');
 }

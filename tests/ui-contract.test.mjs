@@ -50,7 +50,12 @@ test('new-medal setup shows exact live body and ribbon geometry instead of gener
   assert.match(app, /data-wizard-shape-preview/);
   assert.match(app, /wizardAttachmentChoiceMarkup/);
   assert.match(app, /fitInternalAttachmentToBody/);
-  for (const phrase of ['Live 2D preview', 'Finished footprint', 'Ribbon']) assert.match(app, new RegExp(phrase));
+  for (const key of ['wizardUi.livePreview', 'wizardUi.finishedFootprint', 'wizardUi.ribbon']) assert.match(app, new RegExp(key.replace('.', '\\.')));
+  assert.doesNotMatch(app, /const titles = \['Choose a starting point'/);
+  assert.doesNotMatch(app, /attachment\.label\.toLowerCase\(\)/);
+  assert.doesNotMatch(app, /project\.medal\.shape\[0\]\.toUpperCase/);
+  assert.match(app, /shapeCategoryUi\.raceDay/);
+  assert.match(app, /stockStatusUi\.\$\{status\.key\}/);
   assert.match(preview, /medalAttachmentGeometry/);
   assert.match(preview, /presetMedalOutlinePoints/);
   assert.match(preview, /data-preview-attachment/);
@@ -68,8 +73,9 @@ test('the hosted image flow does not render an unavailable generator as a disabl
 });
 
 test('checks, pricing, and export use honest outcome language', async () => {
-  const app = await read('app.js');
-  for (const phrase of ['Show item', 'Fix automatically', 'Estimate only', 'No blocking issues', 'Print it myself', 'Send to a print maker', 'Send a preview & estimate', 'Continue in CAD']) assert.match(app, new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  const [app, localization] = await Promise.all([read('app.js'), read('localization.js')]);
+  const source = `${app}\n${localization}`;
+  for (const phrase of ['Show item', 'Fix automatically', 'Estimate only', 'No blocking issues', 'Print it myself', 'Send to a print maker', 'Send a preview & estimate', 'Continue in CAD']) assert.match(source, new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.doesNotMatch(app, /Production-verified server quote|Coming later/);
 });
 
@@ -82,9 +88,9 @@ test('plain-language operations replace the old visible CAD labels', async () =>
 
 test('cache-busted release assets and static hosting validation stay aligned', async () => {
   const [hub, studio] = await Promise.all([read('index.html'), read('workspaces/medals/index.html')]);
-  assert.match(hub, /release24/);
-  assert.match(studio, /styles\.css\?v=20260831-release24/);
-  assert.match(studio, /app\.js\?v=20260831-release24/);
+  assert.match(hub, /release30/);
+  assert.match(studio, /styles\.css\?v=20260831-release30/);
+  assert.match(studio, /app\.js\?v=20260831-release30/);
 });
 
 test('phone, touch, reduced-motion, and high-contrast contracts remain present', async () => {
@@ -110,7 +116,7 @@ test('project safety and export cancellation keep their asynchronous guarantees'
   assert.match(app, /productionKinds\.has\(button\.dataset\.export\) && blocked/);
   assert.match(sync, /'shape-library\.js'/);
   assert.match(sync, /'guide-library\.js'/);
-  assert.match(sync, /20260831-release24/);
+  assert.match(sync, /20260831-release30/);
 });
 
 test('quick video guides use one accessible captioned player and keep the interactive guide available', async () => {

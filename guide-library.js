@@ -1,5 +1,5 @@
 const guideFile = (stem, extension) => `${stem}.${extension}`;
-const GUIDE_ASSET_VERSION = '20260831-release24';
+const GUIDE_ASSET_VERSION = '20260831-release30';
 
 const guides = [
   {

@@ -29,10 +29,126 @@ const MAX_BRIEF_LENGTH = 2_000;
 const MAX_GENERATED_ELEMENTS = Math.min(72, DESIGN_LIMITS.elements);
 const DEFAULT_EVENT_YEAR = 2026;
 
+// Keys are stored in the same accent-folded form produced by foldForMatch().
+// Inflected month names matter here: ordinary Central-European prompts usually
+// contain "5. maja / 5. května / 5. Mai", not the dictionary form.
 const MONTHS = Object.freeze({
-  january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
-  july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
-  jan: 1, feb: 2, mar: 3, apr: 4, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12,
+  january: 1, jan: 1, januar: 1, janner: 1, januara: 1, leden: 1, ledna: 1, styczen: 1, stycznia: 1,
+  february: 2, feb: 2, februar: 2, februara: 2, unor: 2, unora: 2, luty: 2, lutego: 2,
+  march: 3, mar: 3, marec: 3, marca: 3, marz: 3, marzec: 3,
+  april: 4, apr: 4, aprile: 4, aprila: 4, duben: 4, dubna: 4, kwiecien: 4, kwietnia: 4,
+  may: 5, mai: 5, maj: 5, maja: 5, kveten: 5, kvetna: 5,
+  june: 6, jun: 6, juna: 6, juni: 6, cerven: 6, cervna: 6, czerwiec: 6, czerwca: 6,
+  july: 7, jul: 7, jula: 7, juli: 7, cervenec: 7, cervence: 7, lipiec: 7, lipca: 7,
+  august: 8, aug: 8, augusta: 8, srpen: 8, srpna: 8, sierpien: 8, sierpnia: 8,
+  september: 9, sep: 9, sept: 9, septembra: 9, zari: 9, wrzesien: 9, wrzesnia: 9,
+  october: 10, oct: 10, oktober: 10, okt: 10, oktobra: 10, rijen: 10, rijna: 10, pazdziernik: 10, pazdziernika: 10,
+  november: 11, nov: 11, novembra: 11, listopad: 11, listopadu: 11, listopada: 11,
+  december: 12, dec: 12, dezember: 12, dez: 12, decembra: 12, prosinec: 12, prosince: 12, grudzien: 12, grudnia: 12,
+});
+
+// A compact, deterministic lexicon is intentionally used instead of browser
+// translation or an AI request. A trailing * means "this token starts with";
+// it covers grammatical case, gender and plural suffixes while keeping the
+// parser small enough to run instantly on every client.
+const LANGUAGE_LEXICONS = Object.freeze({
+  en: {
+    signals: ['please', 'create*', 'design*', 'make', 'running', 'runner*', 'night', 'city', 'race*', 'edition'],
+    cycling: ['cycle*', 'cycling', 'cyclist*', 'bike*', 'biking', 'bicycle*', 'mtb'],
+    trail: ['trail*', 'mountain*', 'hike*', 'hiking', 'ultra', 'cross country'],
+    running: ['run*', 'runner*', 'running', 'race*', 'marathon*', 'sprint*', 'relay*'],
+    night: ['night*', 'midnight', 'moon', 'star*', 'dark', 'nocturnal'],
+    city: ['city', 'urban', 'skyline', 'bridge', 'street*'],
+    premium: ['premium', 'elegant*', 'luxury', 'luxurious', 'classic*', 'formal*'],
+    playful: ['kid*', 'junior*', 'school*', 'fun', 'playful', 'family'],
+    technical: ['technical', 'industrial', 'geometric*', 'minimal*'],
+    runnerNouns: ['runner*'],
+    two: ['two', '2'],
+    three: ['three', '3'],
+  },
+  sk: {
+    signals: ['prosím', 'vytvor*', 'navrhni', 'vygeneruj', 'sprav*', 'beh', 'bež*', 'nočn*', 'mestsk*', 'pretek*', 'ročník'],
+    cycling: ['cyklist*', 'bicykl*', 'bajk*', 'bike*', 'mtb'],
+    trail: ['trail*', 'horsk*', 'hora', 'hory', 'horách', 'turist*', 'ultra', 'kros*'],
+    running: ['beh', 'bežeck*', 'bežec*', 'bežkyň*', 'pretek*', 'maratón*', 'šprint*', 'štafet*'],
+    night: ['nočn*', 'noc', 'polnoc*', 'mesiac', 'hviezd*', 'tmav*'],
+    city: ['mesto', 'meste', 'mestsk*', 'panoráma', 'skyline', 'most', 'ulic*'],
+    premium: ['prémi*', 'elegant*', 'luxus*', 'klasick*', 'formáln*'],
+    playful: ['dieťa*', 'deti', 'detsk*', 'junior*', 'školsk*', 'zábavn*', 'hrav*', 'rodinn*'],
+    technical: ['technick*', 'industriáln*', 'geometrick*', 'minimal*'],
+    runnerNouns: ['bežec*', 'bežc*', 'bežkyň*'],
+    two: ['dva', 'dve', 'dvaja', '2'],
+    three: ['tri', 'traja', '3'],
+  },
+  cs: {
+    signals: ['prosím', 'vytvoř*', 'navrhni', 'vygeneruj', 'udělej*', 'běh', 'běž*', 'noční', 'městsk*', 'závod*', 'ročník'],
+    cycling: ['cyklist*', 'bicykl*', 'kolo', 'bike*', 'mtb'],
+    trail: ['trail*', 'horsk*', 'hora', 'hory', 'horách', 'turist*', 'ultra', 'kros*'],
+    running: ['běh', 'běžeck*', 'běžec*', 'běžkyn*', 'závod*', 'maraton*', 'sprint*', 'štafet*'],
+    night: ['noční', 'noc', 'půlnoc*', 'měsíc', 'hvězd*', 'tmav*'],
+    city: ['město', 'městě', 'městsk*', 'panorama', 'skyline', 'most', 'ulic*'],
+    premium: ['prémi*', 'elegant*', 'luxus*', 'klasick*', 'formáln*'],
+    playful: ['dítě', 'děti', 'dětsk*', 'junior*', 'školn*', 'zábavn*', 'hrav*', 'rodinn*'],
+    technical: ['technick*', 'průmyslov*', 'geometrick*', 'minimal*'],
+    runnerNouns: ['běžec*', 'běžc*', 'běžkyn*'],
+    two: ['dva', 'dvě', '2'],
+    three: ['tři', '3'],
+  },
+  de: {
+    signals: ['bitte', 'erstelle*', 'entwirf*', 'generiere*', 'mach*', 'lauf*', 'läufer*', 'nacht*', 'stadt*', 'rennen', 'auflage'],
+    cycling: ['radfahr*', 'radrenn*', 'fahrrad*', 'radtour*', 'biken', 'mountainbike*', 'mtb'],
+    trail: ['trail*', 'berg*', 'wander*', 'gebirg*', 'ultra', 'crosslauf*'],
+    running: ['lauf*', 'läufer*', 'rennen', 'marathon*', 'sprint*', 'staffel*'],
+    night: ['nacht*', 'mitternacht', 'mond', 'stern*', 'dunkel*'],
+    city: ['stadt*', 'städt*', 'skyline', 'brücke', 'straße*', 'strasse*'],
+    premium: ['premium', 'hochwert*', 'edel', 'elegant*', 'luxuriös*', 'klassisch*', 'formell*'],
+    playful: ['kind*', 'junior*', 'schule', 'schul*', 'spaß*', 'spass*', 'verspielt*', 'famil*'],
+    technical: ['technisch*', 'industriell*', 'geometrisch*', 'minimal*'],
+    runnerNouns: ['läufer*'],
+    two: ['zwei', '2'],
+    three: ['drei', '3'],
+  },
+  pl: {
+    signals: ['proszę', 'stwórz*', 'zaprojektuj', 'wygeneruj', 'zrób*', 'bieg*', 'nocn*', 'miejsk*', 'wyścig*', 'edycja'],
+    cycling: ['kolar*', 'rower*', 'jazda rowerowa', 'bike*', 'mtb'],
+    trail: ['trail*', 'górsk*', 'góry', 'trek*', 'ultra', 'przełaj*'],
+    running: ['bieg*', 'biegacz*', 'wyścig*', 'maraton*', 'sprint*', 'sztafet*'],
+    night: ['nocn*', 'noc', 'północ*', 'księżyc', 'gwiazd*', 'ciemn*'],
+    city: ['miasto', 'mieście', 'miejsk*', 'panorama', 'skyline', 'most', 'ulic*'],
+    premium: ['premium', 'eleganck*', 'luksus*', 'klasyczn*', 'formaln*'],
+    playful: ['dziec*', 'junior*', 'szkoł*', 'zabawn*', 'figlarn*', 'rodzinn*'],
+    technical: ['techniczn*', 'przemysłow*', 'geometryczn*', 'minimal*'],
+    runnerNouns: ['biegacz*', 'biegaczk*'],
+    two: ['dwa', 'dwie', 'dwóch', '2'],
+    three: ['trzy', 'trzech', '3'],
+  },
+});
+
+// Accent-sensitive signals resolve the few collisions that accent folding
+// necessarily creates between Czech and Slovak (beh/běh, vytvor/vytvoř).
+// They only select the wording used on the generated medal; all semantic
+// matching remains language-agnostic.
+const RAW_LANGUAGE_SIGNALS = Object.freeze({
+  sk: ['vytvor*', 'sprav*', 'beh', 'bežeck*', 'bežci', 'nočn*', 'mestsk*', 'pretek*', 'súťaž*', 'dňa', 'mája', 'júna', 'júla', 'prahe', 'bratislave', 'košiciach', 'žiline', 'dvaja', 'traja'],
+  cs: ['vytvoř*', 'udělej*', 'běh', 'běžeck*', 'běžci', 'noční', 'městsk*', 'závod*', 'soutěž*', 'dne', 'května', 'června', 'července', 'srpna', 'října', 'praze', 'brně', 'ostravě', 'plzni', 'dvě', 'tři'],
+  de: ['erstelle*', 'entwirf*', 'läufer*', 'nachtlauf*', 'stadtlauf*', 'radrenn*', 'für', 'märz', 'jänner', 'zwei', 'drei'],
+  pl: ['proszę', 'stwórz*', 'zrób*', 'bieg*', 'wyścig*', 'nocn*', 'miejsk*', 'w mieście', 'księżyc', 'półmaraton*', 'październik*', 'dwóch', 'trzech'],
+});
+
+const TITLE_LANGUAGE = Object.freeze({
+  en: { night: 'NIGHT', city: 'CITY', running: 'RUN', cycling: 'RIDE', trail: 'TRAIL', general: 'CHALLENGE', fallback: 'COMMUNITY CHALLENGE', event: 'EVENT' },
+  sk: { night: 'NOČNÝ', city: 'MESTSKÝ', running: 'BEH', cycling: 'CYKLISTIKA', trail: 'TRAIL', general: 'VÝZVA', fallback: 'SPOLOČNÁ VÝZVA', event: 'PODUJATIE' },
+  cs: { night: 'NOČNÍ', city: 'MĚSTSKÝ', running: 'BĚH', cycling: 'CYKLISTIKA', trail: 'TRAIL', general: 'VÝZVA', fallback: 'KOMUNITNÍ VÝZVA', event: 'AKCE' },
+  de: { night: 'NACHT', city: 'STADT', running: 'LAUF', cycling: 'RADRENNEN', trail: 'TRAIL', general: 'CHALLENGE', fallback: 'GEMEINSCHAFTSLAUF', event: 'EVENT' },
+  pl: { night: 'NOCNY', city: 'MIEJSKI', running: 'BIEG', cycling: 'WYŚCIG', trail: 'TRAIL', general: 'WYZWANIE', fallback: 'WSPÓLNE WYZWANIE', event: 'WYDARZENIE' },
+});
+
+const LOCATION_ALIASES = Object.freeze({
+  sk: Object.freeze({ prahe: 'Praha', bratislave: 'Bratislava', kosiciach: 'Košice', ziline: 'Žilina', trnave: 'Trnava', nitre: 'Nitra', presove: 'Prešov', trencine: 'Trenčín', poprade: 'Poprad', 'banskej bystrici': 'Banská Bystrica', brne: 'Brno', ostrave: 'Ostrava', viedni: 'Viedeň', tatrach: 'Tatry', 'ivanke pri nitre': 'Ivanka pri Nitre' }),
+  cs: Object.freeze({ praze: 'Praha', brne: 'Brno', ostrave: 'Ostrava', plzni: 'Plzeň', olomouci: 'Olomouc', 'ceskych budejovicich': 'České Budějovice', 'hradci kralove': 'Hradec Králové', bratislave: 'Bratislava', vidni: 'Vídeň', tatrach: 'Tatry' }),
+  de: Object.freeze({}),
+  pl: Object.freeze({ warszawie: 'Warszawa', krakowie: 'Kraków', lodzi: 'Łódź', wroclawiu: 'Wrocław', poznaniu: 'Poznań', gdansku: 'Gdańsk', lublinie: 'Lublin', katowicach: 'Katowice', szczecinie: 'Szczecin', bydgoszczy: 'Bydgoszcz', bialymstoku: 'Białystok', rzeszowie: 'Rzeszów', pradze: 'Praga', berlinie: 'Berlin', wiedniu: 'Wiedeń' }),
+  en: Object.freeze({}),
 });
 
 const VARIANT_LIBRARY = Object.freeze([
@@ -142,6 +258,75 @@ function cleanBrief(value) {
     .trim();
 }
 
+function foldForMatch(value) {
+  return String(value ?? '')
+    .normalize('NFKD')
+    .replace(/\p{M}+/gu, '')
+    .toLocaleLowerCase('en-US')
+    .replace(/ł/g, 'l')
+    .replace(/ß/g, 'ss');
+}
+
+function normalizeForMatch(value) {
+  return foldForMatch(value).replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeRawForMatch(value) {
+  return String(value ?? '').toLocaleLowerCase('en-US').replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function lexiconEntryMatches(normalizedText, entry) {
+  const prefixMatch = String(entry).endsWith('*');
+  const needle = normalizeForMatch(prefixMatch ? String(entry).slice(0, -1) : entry);
+  if (!needle) return false;
+  if (prefixMatch) return normalizedText.split(' ').some(token => token.startsWith(needle));
+  return ` ${normalizedText} `.includes(` ${needle} `);
+}
+
+function rawLexiconEntryMatches(normalizedText, entry) {
+  const prefixMatch = String(entry).endsWith('*');
+  const needle = normalizeRawForMatch(prefixMatch ? String(entry).slice(0, -1) : entry);
+  if (!needle) return false;
+  if (prefixMatch) return normalizedText.split(' ').some(token => token.startsWith(needle));
+  return ` ${normalizedText} `.includes(` ${needle} `);
+}
+
+function matchesLexicon(value, category) {
+  const normalized = normalizeForMatch(value);
+  return Object.values(LANGUAGE_LEXICONS).some(lexicon =>
+    (lexicon[category] || []).some(entry => lexiconEntryMatches(normalized, entry)));
+}
+
+function canonicalBriefLocale(value) {
+  const code = String(value || '').trim().toLocaleLowerCase('en-US').split(/[-_]/)[0];
+  if (code === 'cz') return 'cs';
+  return Object.hasOwn(LANGUAGE_LEXICONS, code) ? code : '';
+}
+
+function inferBriefLocale(brief, requestedLocale = '') {
+  const requested = canonicalBriefLocale(requestedLocale);
+  if (requested) return requested;
+  const normalized = normalizeForMatch(brief);
+  const rawNormalized = normalizeRawForMatch(brief);
+  let winner = 'en';
+  let bestScore = 0;
+  for (const [locale, lexicon] of Object.entries(LANGUAGE_LEXICONS)) {
+    const foldedScore = lexicon.signals.reduce((total, entry) => total + (lexiconEntryMatches(normalized, entry) ? 1 : 0), 0);
+    const rawScore = (RAW_LANGUAGE_SIGNALS[locale] || []).reduce(
+      (total, entry) => total + (rawLexiconEntryMatches(rawNormalized, entry) ? 2 : 0), 0);
+    const score = foldedScore + rawScore;
+    if (score > bestScore) {
+      winner = locale;
+      bestScore = score;
+    }
+  }
+  return winner;
+}
+
+function monthNumber(value) {
+  return MONTHS[foldForMatch(value).replace(/[^\p{L}]/gu, '')] || 0;
+}
+
 function cleanDisplayText(value, fallback, maxLength = 42) {
   const cleaned = String(value ?? '')
     .replace(/<[^>]*>/g, ' ')
@@ -170,97 +355,137 @@ function extractDate(brief) {
   if (match) return isoDate(Number(match[1]), Number(match[2]), Number(match[3]));
   match = brief.match(/\b(\d{1,2})[./-](\d{1,2})[./-](20\d{2})\b/);
   if (match) return isoDate(Number(match[3]), Number(match[2]), Number(match[1]));
-  match = brief.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?([a-z]+)\s+(20\d{2})\b/i);
-  if (match && MONTHS[match[2].toLowerCase()]) return isoDate(Number(match[3]), MONTHS[match[2].toLowerCase()], Number(match[1]));
-  match = brief.match(/\b([a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(20\d{2})\b/i);
-  if (match && MONTHS[match[1].toLowerCase()]) return isoDate(Number(match[3]), MONTHS[match[1].toLowerCase()], Number(match[2]));
+  match = brief.match(/(?<![\p{L}\p{N}])(\d{1,2})(?:st|nd|rd|th|\.)?\s+(?:(?:of|dňa|dna|dne|am)\s+)?([\p{L}]+)\.?,?\s+(20\d{2})(?!\d)/iu);
+  if (match && monthNumber(match[2])) return isoDate(Number(match[3]), monthNumber(match[2]), Number(match[1]));
+  match = brief.match(/(?<![\p{L}\p{N}])([\p{L}]+)\.?\s+(\d{1,2})(?:st|nd|rd|th|\.)?,?\s+(20\d{2})(?!\d)/iu);
+  if (match && monthNumber(match[1])) return isoDate(Number(match[3]), monthNumber(match[1]), Number(match[2]));
   return '';
 }
 
 function extractDateRangeLabel(brief) {
   let match = brief.match(/\b(\d{1,2})\s*[-–]\s*(\d{1,2})[./](\d{1,2})[./](20\d{2})\b/);
   if (match) return `${String(Number(match[1])).padStart(2, '0')}-${String(Number(match[2])).padStart(2, '0')}.${String(Number(match[3])).padStart(2, '0')}.${match[4]}`;
-  match = brief.match(/\b(\d{1,2})\s*[-–]\s*(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?([a-z]+)\s+(20\d{2})\b/i);
-  const month = match ? MONTHS[match[3].toLowerCase()] : 0;
+  match = brief.match(/(?<![\p{L}\p{N}])(\d{1,2})\.?\s*[-–]\s*(\d{1,2})(?:st|nd|rd|th|\.)?\s+(?:(?:of|dňa|dna|dne|am)\s+)?([\p{L}]+)\.?,?\s+(20\d{2})(?!\d)/iu);
+  const month = match ? monthNumber(match[3]) : 0;
   return match && month
     ? `${String(Number(match[1])).padStart(2, '0')}-${String(Number(match[2])).padStart(2, '0')}.${String(month).padStart(2, '0')}.${match[4]}`
     : '';
 }
 
 function extractDistance(brief) {
-  const marathon = /\bhalf[ -]?marathon\b/i.test(brief) ? '21.1K' : /\bmarathon\b/i.test(brief) ? '42.2K' : '';
+  const normalized = normalizeForMatch(brief);
+  const halfMarathon = ['half marathon', 'polmaraton', 'pulmaraton', 'halbmarathon']
+    .some(entry => lexiconEntryMatches(normalized, entry));
+  const fullMarathon = ['marathon', 'maraton']
+    .some(entry => lexiconEntryMatches(normalized, entry));
+  const marathon = halfMarathon ? '21.1K' : fullMarathon ? '42.2K' : '';
   if (marathon) return marathon;
-  const match = brief.match(/\b(\d{1,3}(?:[.,]\d{1,2})?)\s*(km|kilomet(?:er|re)s?|k|mi|miles?)\b/i);
+  const match = foldForMatch(brief).match(/(?<![\p{L}\p{N}])(\d{1,3}(?:[.,]\d{1,2})?)\s*(km|kilomet(?:er|re)s?|kilometr[\p{L}]*|k|mi|miles?|mile|mil|meile[\p{L}]*)(?![\p{L}\p{N}])/iu);
   if (!match) return '';
   const amount = match[1].replace(',', '.');
-  return `${amount}${/^mi/i.test(match[2]) ? 'MI' : 'K'}`.slice(0, 10);
+  return `${amount}${/^(?:mi|mile|mil|meil)/i.test(match[2]) ? 'MI' : 'K'}`.slice(0, 10);
 }
 
 function extractEdition(brief) {
-  const match = brief.match(/\b(?:(\d{1,3})(?:st|nd|rd|th)?\s+(?:annual|edition|year)|(?:edition|year)\s+(\d{1,3}))\b/i);
+  const normalized = normalizeForMatch(brief);
+  const terms = '(?:annual|edition|year|rocnik|edycja|ausgabe|auflage|jahrgang)';
+  const match = normalized.match(new RegExp(`(?:^| )(?:(\\d{1,3})(?:st|nd|rd|th)?\\s+${terms}|${terms}\\s+(\\d{1,3}))(?: |$)`, 'i'));
   return match ? String(Number(match[1] || match[2])) : '';
 }
 
-function extractLocation(brief) {
+function normalizeLocation(candidate, locale) {
+  const cleaned = cleanDisplayText(candidate, '', 30)
+    .replace(/\b(?:the|a|an|der|die|das|dem|den|eine|einer)\b$/iu, '')
+    .trim();
+  if (!cleaned) return '';
+  return LOCATION_ALIASES[locale]?.[normalizeForMatch(cleaned)] || titleCase(cleaned);
+}
+
+function extractLocation(brief, locale = 'en') {
+  const word = "[\\p{L}][\\p{L}'’\\-]*";
+  const eventDescriptor = '(?:night|midnight|day|evening|trail|city|urban|half|marathon|marat[\p{L}]*|p[\p{L}]*marat[\p{L}]*|halbmarathon|run|race|ride|cycling|challenge|competition|nočn[\p{L}]*|denn[\p{L}]*|večern[\p{L}]*|mestsk[\p{L}]*|městsk[\p{L}]*|beh|běh|bežeck[\p{L}]*|běžeck[\p{L}]*|pretek[\p{L}]*|závod[\p{L}]*|cyklist[\p{L}]*|výzva|súťaž|soutěž|nacht[\p{L}]*|abend[\p{L}]*|stadtlauf|lauf|rennen|radrenn[\p{L}]*|wettkampf|nocn[\p{L}]*|dzienn[\p{L}]*|wieczorn[\p{L}]*|miejsk[\p{L}]*|bieg[\p{L}]*|wyścig[\p{L}]*|wyzwanie|zawody)';
+  const stop = '(?:on|at|during|for|with|there|which|that|and|dňa|dna|počas|pre|ktor[\p{L}]*|dne|během|pro|kter[\p{L}]*|am|um|während|für|mit|und|dnia|podczas|dla|któr[\p{L}]*|i)';
   const patterns = [
     // Many ordinary users start with the place instead of writing “in Prague”.
     // Stop before the first event descriptor so only the location becomes type.
-    /^\s*([\p{L}][\p{L}'’\-]*(?:\s+[\p{L}][\p{L}'’\-]*){0,2}?)\s+(?=(?:night|midnight|day|evening|trail|city|urban|half|marathon|run|race|ride|cycling|challenge|competition)\b)/iu,
-    /\b(?:city of|town of)\s+([\p{L}][\p{L}'’\-]*(?:\s+[\p{L}][\p{L}'’\-]*){0,2})/iu,
-    /\b(?:in|near)\s+([\p{L}][\p{L}'’\-]*(?:\s+[\p{L}][\p{L}'’\-]*){0,2})(?=\s+(?:on|at|during|for|with|there|which|that|and)\b|[,.!?]|$)/iu,
+    new RegExp(`^\\s*(${word}(?:\\s+${word}){0,2}?)\\s+(?=${eventDescriptor}(?![\\p{L}\\p{N}]))`, 'iu'),
+    new RegExp(`(?:^|[^\\p{L}\\p{N}])(?:city\\s+of|town\\s+of|mesto|meste|město|městě|stadt|miasto|mieście)(?:\\s+(?:of|von))?\\s+(${word}(?:\\s+${word}){0,2}?)(?=\\s+${stop}(?![\\p{L}\\p{N}])|\\s+\\d|[,.!?]|$)`, 'iu'),
+    new RegExp(`(?:^|[^\\p{L}\\p{N}])(?:in|near|v|vo|ve|pri|neďaleko|blízko|u|poblíž|bei|nahe|w|we|koło|blisko|niedaleko)\\s+(${word}(?:\\s+${word}){0,2}?)(?=\\s+${stop}(?![\\p{L}\\p{N}])|\\s+\\d|[,.!?]|$)`, 'iu'),
   ];
   for (const pattern of patterns) {
     const match = brief.match(pattern);
     if (match) {
-      const candidate = cleanDisplayText(match[1], '', 30).replace(/\b(?:the|a|an)\b$/i, '').trim();
-      if (candidate && !/^(?:night|day|evening|morning|city|run|race)$/i.test(candidate)) return titleCase(candidate);
+      const candidate = normalizeLocation(match[1], locale);
+      const candidateWords = normalizeForMatch(candidate).split(' ').filter(Boolean);
+      const looksLikeEvent = candidateWords.length > 0 && candidateWords.every(word =>
+        ['running', 'cycling', 'trail', 'night', 'city'].some(category => matchesLexicon(word, category)));
+      if (candidate && !looksLikeEvent) return candidate;
     }
   }
   return '';
 }
 
 function inferDiscipline(brief) {
-  if (/\b(?:cycl(?:e|ing|ist)|bike|biking|bicycle|mtb)\b/i.test(brief)) return 'cycling';
-  if (/\b(?:trail|mountain|ultra|hike|hiking|cross-country)\b/i.test(brief)) return 'trail';
-  if (/\b(?:run|runner|running|race|marathon|sprint|relay|5k|10k)\b/i.test(brief)) return 'running';
+  if (/\b(?:cycl(?:e|ing|ist)|bike|biking|bicycle|mtb)\b/i.test(brief) || matchesLexicon(brief, 'cycling')) return 'cycling';
+  if (/\b(?:trail|mountain|ultra|hike|hiking|cross-country)\b/i.test(brief) || matchesLexicon(brief, 'trail')) return 'trail';
+  if (/\b(?:run|runner|running|race|marathon|sprint|relay|5k|10k)\b/i.test(brief) || matchesLexicon(brief, 'running')) return 'running';
   return 'general';
 }
 
 function inferMotif(brief, discipline) {
   if (discipline === 'cycling') return 'cycling';
   if (discipline === 'trail') return 'trail';
-  if (/\b(?:night|midnight|moon|stars?|dark|nocturnal)\b/i.test(brief)) return 'night';
-  if (/\b(?:city|urban|skyline|bridge|street)\b/i.test(brief)) return 'city';
+  if (/\b(?:night|midnight|moon|stars?|dark|nocturnal)\b/i.test(brief) || matchesLexicon(brief, 'night')) return 'night';
+  if (/\b(?:city|urban|skyline|bridge|street)\b/i.test(brief) || matchesLexicon(brief, 'city')) return 'city';
   if (discipline === 'running') return 'runner';
   return 'general';
 }
 
 function inferMood(brief) {
-  if (/\b(?:premium|elegant|luxury|classic|formal)\b/i.test(brief)) return 'premium';
-  if (/\b(?:kids?|junior|school|fun|playful|family)\b/i.test(brief)) return 'playful';
-  if (/\b(?:technical|industrial|geometric|minimal)\b/i.test(brief)) return 'technical';
+  if (/\b(?:premium|elegant|luxury|classic|formal)\b/i.test(brief) || matchesLexicon(brief, 'premium')) return 'premium';
+  if (/\b(?:kids?|junior|school|fun|playful|family)\b/i.test(brief) || matchesLexicon(brief, 'playful')) return 'playful';
+  if (/\b(?:technical|industrial|geometric|minimal)\b/i.test(brief) || matchesLexicon(brief, 'technical')) return 'technical';
   return 'bold';
+}
+
+function hasCountedRunners(brief, countCategory) {
+  const tokens = normalizeForMatch(brief).split(' ').filter(Boolean);
+  const countEntries = Object.values(LANGUAGE_LEXICONS).flatMap(lexicon => lexicon[countCategory] || []);
+  const nounEntries = Object.values(LANGUAGE_LEXICONS).flatMap(lexicon => lexicon.runnerNouns || []);
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (!countEntries.some(entry => lexiconEntryMatches(tokens[index], entry))) continue;
+    const nearby = tokens.slice(index + 1, index + 5).join(' ');
+    if (nounEntries.some(entry => lexiconEntryMatches(nearby, entry))) return true;
+  }
+  return false;
 }
 
 function inferRunnerCount(brief, discipline) {
   if (discipline !== 'running') return 1;
-  if (/\b(?:three|3)\s+(?:elegant\s+|dynamic\s+|athletic\s+)?runners?\b/i.test(brief)) return 3;
-  if (/\b(?:two|2)\s+(?:elegant\s+|dynamic\s+|athletic\s+)?runners?\b/i.test(brief)) return 2;
+  if (/\b(?:three|3)\s+(?:elegant\s+|dynamic\s+|athletic\s+)?runners?\b/i.test(brief) || hasCountedRunners(brief, 'three')) return 3;
+  if (/\b(?:two|2)\s+(?:elegant\s+|dynamic\s+|athletic\s+)?runners?\b/i.test(brief) || hasCountedRunners(brief, 'two')) return 2;
   return 1;
 }
 
-function disciplineLabel(discipline) {
-  if (discipline === 'cycling') return 'RIDE';
-  if (discipline === 'trail') return 'TRAIL';
-  if (discipline === 'running') return 'RUN';
-  return 'CHALLENGE';
+function disciplineLabel(discipline, locale = 'en') {
+  const labels = TITLE_LANGUAGE[locale] || TITLE_LANGUAGE.en;
+  return labels[discipline] || labels.general;
 }
 
-function derivedTitle({ location, discipline, motif }, rawBrief) {
-  const motifWord = motif === 'night' ? 'NIGHT' : motif === 'city' ? 'CITY' : '';
-  const parts = [location ? location.toLocaleUpperCase('en-US') : '', motifWord, disciplineLabel(discipline)].filter(Boolean);
-  let title = cleanDisplayText(parts.join(' '), 'COMMUNITY CHALLENGE', 34).toLocaleUpperCase('en-US');
-  if (title.toLocaleLowerCase('en-US') === rawBrief.toLocaleLowerCase('en-US')) title = `${title} EVENT`.slice(0, 34);
+function derivedTitle({ location, discipline, motif }, rawBrief, locale = 'en') {
+  const labels = TITLE_LANGUAGE[locale] || TITLE_LANGUAGE.en;
+  let motifWord = motif === 'night' ? labels.night : motif === 'city' ? labels.city : '';
+  let disciplineWord = disciplineLabel(discipline, locale);
+  if (locale === 'de' && discipline === 'running' && motif === 'night') {
+    motifWord = '';
+    disciplineWord = 'NACHTLAUF';
+  } else if (locale === 'de' && discipline === 'running' && motif === 'city') {
+    motifWord = '';
+    disciplineWord = 'STADTLAUF';
+  }
+  const parts = [location ? location.toLocaleUpperCase('en-US') : '', motifWord, disciplineWord].filter(Boolean);
+  let title = cleanDisplayText(parts.join(' '), labels.fallback, 34).toLocaleUpperCase('en-US');
+  if (title.toLocaleLowerCase('en-US') === rawBrief.toLocaleLowerCase('en-US')) title = `${title} ${labels.event}`.slice(0, 34);
   return title;
 }
 
@@ -415,16 +640,17 @@ export function validateMedalDesignPlan(input) {
 /** Parse ordinary event language without retaining or displaying the raw brief. */
 export function parseMedalBrief(value, options = {}) {
   const brief = cleanBrief(value);
+  const locale = inferBriefLocale(brief, options.locale);
   const discipline = inferDiscipline(brief);
   const motif = inferMotif(brief, discipline);
   const mood = inferMood(brief);
   const date = extractDate(brief);
-  const location = extractLocation(brief);
+  const location = extractLocation(brief, locale);
   const yearMatch = brief.match(/\b(20\d{2})\b/);
   const parsed = normalizeMedalDesignPlan({
     sourceFingerprint: stableHash(brief.toLocaleLowerCase('en-US')),
     event: {
-      title: derivedTitle({ location, discipline, motif }, brief),
+      title: derivedTitle({ location, discipline, motif }, brief, locale),
       subtitle: options.subtitle || extractDateRangeLabel(brief),
       location,
       distance: extractDistance(brief),
