@@ -2488,6 +2488,40 @@ Object.assign(PL.guides, {
 });
 Object.assign(PL.add, { placeOnMedal: 'Umieść na medalu', ideas: 'Utwórz na podstawie pomysłu' });
 
+// Multiline text controls intentionally live in the semantic text catalog.
+// Their English values also match the literal editor labels so dynamically
+// rendered panels are translated by the source-message registry.
+Object.assign(EN.text, {
+  multilineHint: 'Text · use Enter for a new line',
+  lineSpacing: 'Line spacing', lineSpacingCompact: 'Compact', lineSpacingNormal: 'Normal', lineSpacingWide: 'Wide',
+  alignment: 'Alignment', alignmentAria: 'Text alignment',
+  applyMultilineHint: 'Ctrl/⌘ Enter applies · Esc restores',
+});
+Object.assign(SK.text, {
+  multilineHint: 'Text · nový riadok vložíte klávesom Enter',
+  lineSpacing: 'Riadkovanie', lineSpacingCompact: 'Kompaktné', lineSpacingNormal: 'Normálne', lineSpacingWide: 'Široké',
+  alignment: 'Zarovnanie', alignmentAria: 'Zarovnanie textu',
+  applyMultilineHint: 'Ctrl/⌘ Enter použije zmeny · Esc obnoví pôvodný stav',
+});
+Object.assign(CS.text, {
+  multilineHint: 'Text · nový řádek vložíte klávesou Enter',
+  lineSpacing: 'Řádkování', lineSpacingCompact: 'Kompaktní', lineSpacingNormal: 'Normální', lineSpacingWide: 'Široké',
+  alignment: 'Zarovnání', alignmentAria: 'Zarovnání textu',
+  applyMultilineHint: 'Ctrl/⌘ Enter použije změny · Esc obnoví původní stav',
+});
+Object.assign(DE.text, {
+  multilineHint: 'Text · Enter fügt eine neue Zeile ein',
+  lineSpacing: 'Zeilenabstand', lineSpacingCompact: 'Kompakt', lineSpacingNormal: 'Normal', lineSpacingWide: 'Breit',
+  alignment: 'Ausrichtung', alignmentAria: 'Textausrichtung',
+  applyMultilineHint: 'Strg/⌘ Enter übernimmt · Esc stellt wieder her',
+});
+Object.assign(PL.text, {
+  multilineHint: 'Tekst · Enter dodaje nowy wiersz',
+  lineSpacing: 'Interlinia', lineSpacingCompact: 'Kompaktowe', lineSpacingNormal: 'Normalne', lineSpacingWide: 'Szerokie',
+  alignment: 'Wyrównanie', alignmentAria: 'Wyrównanie tekstu', left: 'Do lewej', center: 'Do środka', right: 'Do prawej',
+  applyMultilineHint: 'Ctrl/⌘ Enter zatwierdza · Esc przywraca poprzedni stan',
+});
+
 Object.assign(EN.ideas, { generateFour: 'Create 4 editable medal ideas' });
 Object.assign(SK.ideas, { generateFour: 'Vytvoriť 4 upraviteľné návrhy medaily' });
 Object.assign(CS.ideas, { generateFour: 'Vytvořit 4 upravitelné návrhy medaile' });

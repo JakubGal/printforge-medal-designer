@@ -11,6 +11,7 @@ import {
   buildChecks,
   calculateQuote,
   createTemplateProject,
+  drawTextBlock,
   elementBounds,
   elementFitsSafeArea,
   enforceFlatBackArtwork,
@@ -25,6 +26,9 @@ import {
   normalizeInventory,
   normalizeProject,
   normalizeProjectBundle,
+  normalizeTextAlignment,
+  normalizeTextLineHeight,
+  normalizeTextValue,
   normalizeDrawnPath,
   offsetPolygon,
   polygonSelfIntersects,
@@ -37,6 +41,8 @@ import {
   simplifyClosedRing,
   simplifyPolyline,
   snapToLayer,
+  textBlockMetrics,
+  textDisplayName,
   uid,
 } from './project-model.js';
 import {
@@ -76,7 +82,7 @@ import {
   localizeSubtree,
   translateUi,
   translateUiKey,
-} from './localization-runtime.js?v=20260901-release36';
+} from './localization-runtime.js?v=20260901-release37';
 
 const QA_FIXTURE_ALIASES = Object.freeze({
   'final-premium-medal': 'showcase-night',
@@ -887,6 +893,8 @@ function captureColorContext(context) {
     size: $('#newTextSize')?.value,
     weight: $('#newTextWeight')?.value,
     font: $('#newTextFont')?.value,
+    alignment: $('[data-new-text-align].active')?.dataset.newTextAlign || 'center',
+    lineHeight: $('#newTextLineHeight')?.value,
     position: $('#newTextPosition')?.value,
     autoFit: $('#newTextAutoFit')?.checked,
   } : null;
@@ -946,6 +954,12 @@ function finalizeColorContext(context, slot, captured) {
     if ($('#newTextSize')) $('#newTextSize').value = captured.textDraft.size;
     if ($('#newTextWeight')) $('#newTextWeight').value = captured.textDraft.weight;
     if ($('#newTextFont')) $('#newTextFont').value = captured.textDraft.font || 'Arial';
+    if ($('#newTextLineHeight')) $('#newTextLineHeight').value = captured.textDraft.lineHeight || '1.2';
+    $$('[data-new-text-align]').forEach(button => {
+      const active = button.dataset.newTextAlign === normalizeTextAlignment(captured.textDraft.alignment);
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-checked', String(active));
+    });
     if ($('#newTextPosition')) $('#newTextPosition').value = captured.textDraft.position || 'center';
     if ($('#newTextAutoFit')) $('#newTextAutoFit').checked = captured.textDraft.autoFit !== false;
   }
@@ -1159,13 +1173,16 @@ function createColorPickerHtml() {
 function textPanel(embedded = false) {
   return `${embedded ? '' : panelHeading('Add content', 'New text')}
     <div class="tool-form">
-      <label><span>Text</span><input class="text-input" id="newTextValue" value="YOUR EVENT" maxlength="80" /></label>
+      <label><span>Text · use Enter for a new line</span><textarea class="text-input text-entry-area" id="newTextValue" rows="3" maxlength="240">YOUR EVENT</textarea></label>
       <div class="dimension-grid">
         <label>Size<input id="newTextSize" type="number" min="1" max="${DESIGN_LIMITS.textSizeMax}" step="0.1" value="6" /></label>
         <label>Weight<select id="newTextWeight"><option value="700">Bold</option><option value="800" selected>Extra bold</option><option value="900">Heavy</option></select></label>
         <label>Style<select id="newTextFont"><option value="Arial">Clean</option><option value="Verdana">Wide</option><option value="Georgia">Classic serif</option></select></label>
+        <label>Line spacing<select id="newTextLineHeight"><option value="1">Compact</option><option value="1.2" selected>Normal</option><option value="1.45">Wide</option></select></label>
         <label>Starting position<select id="newTextPosition"><option value="center">Center</option><option value="top">Near the top</option><option value="bottom">Near the bottom</option></select></label>
       </div>
+      <label class="field-label">Alignment</label>
+      <div class="segmented text-alignment-segmented" role="radiogroup" aria-label="Text alignment"><button type="button" role="radio" aria-checked="false" data-new-text-align="left">Left</button><button type="button" role="radio" aria-checked="true" class="active" data-new-text-align="center">Center</button><button type="button" role="radio" aria-checked="false" data-new-text-align="right">Right</button></div>
       <label class="check-row compact-check"><input id="newTextAutoFit" type="checkbox" checked><span><strong>Auto-fit long text</strong><small>Keeps wording inside the printable edge.</small></span></label>
       ${createColorPickerHtml()}
       <button class="primary-wide" id="addTextButton">Next: position text in 3D</button>
@@ -1291,7 +1308,7 @@ function cloudArtworkPrompt(brief, style = 'photo-medal') {
 }
 
 function conceptText(name, value, x, y, fontSize, color, options = {}) {
-  return { id: uid('text'), type: 'text', name, text: value, x, y, fontSize, fontFamily: 'Arial', weight: options.weight || 900, rotation: options.rotation || 0, color, hidden: false, face: options.face === 'back' ? 'back' : 'front', groupId: options.groupId || null, scaleX: 1, scaleY: 1, lockAspect: true, operation: options.operation || 'raise', zHeight: options.zHeight || .6, zDepth: options.zDepth || .4, inlayHeight: options.inlayHeight || 0, layerSnap: true, combine: 'replace', locked: false };
+  return { id: uid('text'), type: 'text', name, text: value, textAlign: normalizeTextAlignment(options.textAlign), lineHeight: Number(options.lineHeight) || 1.2, x, y, fontSize, fontFamily: 'Arial', weight: options.weight || 900, rotation: options.rotation || 0, color, hidden: false, face: options.face === 'back' ? 'back' : 'front', groupId: options.groupId || null, scaleX: 1, scaleY: 1, lockAspect: true, operation: options.operation || 'raise', zHeight: options.zHeight || .6, zDepth: options.zDepth || .4, inlayHeight: options.inlayHeight || 0, layerSnap: true, combine: 'replace', locked: false };
 }
 
 function parseConceptBrief(brief) {
@@ -1856,7 +1873,7 @@ function renderPlacementGhost(element) {
   context.strokeStyle = context.fillStyle;
   context.lineCap = 'round'; context.lineJoin = 'round';
   if (element.type === 'text') {
-    context.textAlign = 'center'; context.textBaseline = 'middle'; context.font = `${element.weight || 800} ${element.fontSize}px ${element.fontFamily || 'Arial'}`; context.fillText(element.text || 'TEXT', 0, 0);
+    drawTextBlock(context, element);
   } else if (element.type === 'shape') {
     drawShapePath(context, element.shape, element.size); context.fill();
   } else if (element.type === 'path') {
@@ -2333,16 +2350,25 @@ function bindToolPanel() {
     else state.drawing.depth = Math.min(value, state.project.medal.baseThickness - state.project.medal.minimumFloor);
     renderToolPanel();
   });
+  $$('[data-new-text-align]').forEach(button => button.addEventListener('click', () => {
+    $$('[data-new-text-align]').forEach(item => {
+      const active = item === button;
+      item.classList.toggle('active', active);
+      item.setAttribute('aria-checked', String(active));
+    });
+  }));
   $('#addTextButton')?.addEventListener('click', () => {
-    const value = $('#newTextValue').value.trim() || 'YOUR EVENT';
+    const value = normalizeTextValue($('#newTextValue').value, 'YOUR EVENT');
     let fontSize = Number($('#newTextSize').value) || 6;
     if ($('#newTextAutoFit')?.checked) {
       const safeWidth = Math.max(8, state.project.medal.width - 2 * (state.project.medal.edgeInset + state.project.medal.rimWidth + 2));
-      fontSize = Math.min(fontSize, safeWidth / Math.max(1, value.length * .59));
+      const safeHeight = Math.max(8, state.project.medal.height - 2 * (state.project.medal.edgeInset + state.project.medal.rimWidth + 2));
+      const draft = textBlockMetrics({ text: value, fontSize, fontFamily: $('#newTextFont')?.value || 'Arial', weight: Number($('#newTextWeight').value) || 800, lineHeight: Number($('#newTextLineHeight')?.value) || 1.2 });
+      fontSize *= Math.min(1, safeWidth / Math.max(.1, draft.width), safeHeight / Math.max(.1, draft.height));
     }
     const position = $('#newTextPosition')?.value || 'center';
     const y = position === 'top' ? -state.project.medal.height * .22 : position === 'bottom' ? state.project.medal.height * .22 : 0;
-    const element = { id: uid('text'), type: 'text', name: value.slice(0, 24), text: value, x: 0, y, fontSize: Math.max(1, fontSize), fontFamily: $('#newTextFont')?.value || 'Arial', weight: Number($('#newTextWeight').value) || 800, rotation: 0, color: Math.min(state.drawing.color, state.project.paletteIds.length - 1), hidden: false, ...operationDefaults() };
+    const element = { id: uid('text'), type: 'text', name: textDisplayName(value), text: value, textAlign: normalizeTextAlignment($('[data-new-text-align].active')?.dataset.newTextAlign), lineHeight: Number($('#newTextLineHeight')?.value) || 1.2, x: 0, y, fontSize: Math.max(1, fontSize), fontFamily: $('#newTextFont')?.value || 'Arial', weight: Number($('#newTextWeight').value) || 800, rotation: 0, color: Math.min(state.drawing.color, state.project.paletteIds.length - 1), hidden: false, ...operationDefaults() };
     queuePlacement(element, 'text');
   });
   $$('[data-add-shape]').forEach(button => button.addEventListener('click', () => {
@@ -3192,7 +3218,7 @@ function renderSelectionHud() {
   root.hidden = false;
   slicerDock?.classList.toggle('selection-active', state.view === '3d');
   const directTextEditor = element.type === 'text' && !element.locked
-    ? `<label class="selection-inline-text"><span>Edit selected text</span><input type="text" data-inline-text-editor data-inline-element="${escapeHtml(element.id)}" value="${escapeHtml(element.text || '')}" maxlength="80" aria-label="Edit selected medal text"/><small>Enter applies · Esc restores</small></label>`
+    ? `<label class="selection-inline-text"><span>Edit selected text</span><textarea data-inline-text-editor data-inline-element="${escapeHtml(element.id)}" rows="2" maxlength="240" aria-label="Edit selected medal text">${escapeHtml(element.text || '')}</textarea><small>Ctrl/⌘ Enter applies · Esc restores</small></label>`
     : '';
   const editButtons = element.locked
     ? '<i>Locked</i>'
@@ -3226,7 +3252,7 @@ function renderSelectionHud() {
       const target = state.project.elements.find(item => item.id === elementId);
       if (!target || target.locked) return;
       target.text = textInput.value;
-      target.name = textInput.value.trim().slice(0, 24) || 'Text';
+      target.name = textDisplayName(textInput.value);
       state.project.template = 'custom';
       root.querySelector('.selection-hud-copy strong').textContent = target.name;
       $('#undoButton').disabled = false;
@@ -3236,7 +3262,7 @@ function renderSelectionHud() {
       renderSelectionHud();
     });
     textInput.addEventListener('keydown', event => {
-      if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); finish(); }
+      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); event.stopPropagation(); finish(); }
       else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); finish({ cancelled: true }); }
     });
     textInput.addEventListener('blur', () => finish());
@@ -3455,7 +3481,7 @@ function renderInspector() {
   const editingLocked = element.locked || Boolean(state.liveEdit);
   const disabled = editingLocked ? 'disabled' : '';
   if (element.type === 'text') {
-    specific = `<label class="field-label">Wording · edit directly</label><input class="text-input" data-element-field="text" value="${escapeHtml(element.text)}" maxlength="80" ${disabled}/><div class="control-grid"><label><span>Size</span><div class="unit-input"><input data-element-field="fontSize" data-number type="number" min="1" max="${DESIGN_LIMITS.textSizeMax}" step="0.1" value="${element.fontSize}" ${disabled}/><em>mm</em></div></label><label><span>Weight</span><select class="select-input" data-element-field="weight" data-number ${disabled}><option value="700" ${element.weight === 700 ? 'selected' : ''}>Bold</option><option value="800" ${element.weight === 800 ? 'selected' : ''}>Extra bold</option><option value="900" ${element.weight === 900 ? 'selected' : ''}>Heavy</option></select></label><label><span>Style</span><select class="select-input" data-element-field="fontFamily" ${disabled}><option value="Arial" ${element.fontFamily === 'Arial' ? 'selected' : ''}>Clean</option><option value="Verdana" ${element.fontFamily === 'Verdana' ? 'selected' : ''}>Wide</option><option value="Georgia" ${element.fontFamily === 'Georgia' ? 'selected' : ''}>Classic serif</option></select></label></div>`;
+    specific = `<label class="field-label">Wording · edit directly</label><textarea class="text-input text-entry-area" data-element-field="text" rows="3" maxlength="240" ${disabled}>${escapeHtml(element.text)}</textarea><p class="field-help">Ctrl/⌘ Enter applies · Esc restores</p><div class="control-grid"><label><span>Size</span><div class="unit-input"><input data-element-field="fontSize" data-number type="number" min="1" max="${DESIGN_LIMITS.textSizeMax}" step="0.1" value="${element.fontSize}" ${disabled}/><em>mm</em></div></label><label><span>Weight</span><select class="select-input" data-element-field="weight" data-number ${disabled}><option value="700" ${element.weight === 700 ? 'selected' : ''}>Bold</option><option value="800" ${element.weight === 800 ? 'selected' : ''}>Extra bold</option><option value="900" ${element.weight === 900 ? 'selected' : ''}>Heavy</option></select></label><label><span>Style</span><select class="select-input" data-element-field="fontFamily" ${disabled}><option value="Arial" ${element.fontFamily === 'Arial' ? 'selected' : ''}>Clean</option><option value="Verdana" ${element.fontFamily === 'Verdana' ? 'selected' : ''}>Wide</option><option value="Georgia" ${element.fontFamily === 'Georgia' ? 'selected' : ''}>Classic serif</option></select></label><label><span>Alignment</span><select class="select-input" data-element-field="textAlign" ${disabled}><option value="left" ${element.textAlign === 'left' ? 'selected' : ''}>Left</option><option value="center" ${element.textAlign === 'center' ? 'selected' : ''}>Center</option><option value="right" ${element.textAlign === 'right' ? 'selected' : ''}>Right</option></select></label><label><span>Line spacing</span><select class="select-input" data-element-field="lineHeight" data-number ${disabled}><option value="1" ${Math.abs(element.lineHeight - 1) < .01 ? 'selected' : ''}>Compact</option><option value="1.2" ${Math.abs(element.lineHeight - 1.2) < .01 ? 'selected' : ''}>Normal</option><option value="1.45" ${Math.abs(element.lineHeight - 1.45) < .01 ? 'selected' : ''}>Wide</option></select></label></div>`;
   } else if (element.type === 'shape') {
     specific = `<div class="control-grid"><label><span>Size</span><div class="unit-input"><input data-element-field="size" data-number type="number" min="1" max="${DESIGN_LIMITS.shapeSizeMax}" step="0.1" value="${element.size}" ${disabled}/><em>mm</em></div></label><label><span>Shape</span><input class="text-input" value="${escapeHtml(shapeInfo(element.shape).label)}" disabled/></label></div>`;
   } else if (element.type === 'image') {
@@ -3485,7 +3511,9 @@ function applyElementField(element, field, input) {
     element.detailCell = element.width / element.pixelWidth;
     element.minimumFeature = Math.max(element.detailCell, (element.minimumFeature || element.detailCell) * element.width / previousWidth);
   } else element[field] = value;
-  if (field === 'text') element.name = value.slice(0, 24) || 'Text';
+  if (field === 'text') element.name = textDisplayName(value);
+  if (field === 'textAlign') element.textAlign = normalizeTextAlignment(value);
+  if (field === 'lineHeight') element.lineHeight = normalizeTextLineHeight(value);
   state.project.template = 'custom';
 }
 
@@ -3546,7 +3574,7 @@ function bindInspector() {
     };
     input.addEventListener('focus', () => { state.inspectorEditStart = snapshot(); });
     input.addEventListener('keydown', event => {
-      if (event.key === 'Enter' && input.dataset.elementField === 'text') { event.preventDefault(); input.blur(); }
+      if (event.key === 'Enter' && input.dataset.elementField === 'text' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); input.blur(); }
       if (event.key === 'Escape' && state.inspectorEditStart) {
         event.preventDefault();
         state.project = normalizeProject(JSON.parse(state.inspectorEditStart));
@@ -4053,7 +4081,7 @@ function drawElement(context, element, metrics, palette) {
     context.shadowColor = 'rgba(255,255,255,.38)'; context.shadowBlur = 1; context.shadowOffsetY = 1.5;
   }
   if (element.type === 'text') {
-    context.textAlign = 'center'; context.textBaseline = 'middle'; context.font = `${element.weight || 800} ${element.fontSize * scale}px ${element.fontFamily || 'Arial'}`; context.fillText(element.text || '', 0, 0);
+    drawTextBlock(context, element, { scale });
   } else if (element.type === 'shape') {
     drawShapePath(context, element.shape, element.size * scale); context.fill();
   } else if (element.type === 'image') {
@@ -7709,7 +7737,7 @@ function bindViewerControls() {
         if (element.type === 'text' && !element.locked) requestAnimationFrame(() => {
           const input = $('#selectionHud [data-inline-text-editor]');
           input?.focus(); input?.select();
-          $('#stageHint').textContent = `Edit “${element.text}” directly, then press Enter · drag the center handle to move`;
+          $('#stageHint').textContent = `Edit “${textDisplayName(element.text)}” directly · Ctrl/⌘ Enter applies · drag the center handle to move`;
         });
       }
       return;
@@ -7789,7 +7817,7 @@ function bindViewerControls() {
     renderInspector(); renderSelectionHud();
     const input = $('#selectionHud [data-inline-text-editor]');
     input?.focus(); input?.select();
-    $('#stageHint').textContent = translateUiKey('stage.editingText', { text: hit.text });
+    $('#stageHint').textContent = translateUiKey('stage.editingText', { text: textDisplayName(hit.text) });
   });
   modelCanvas.addEventListener('pointerleave', () => {
     if (state.modelDrag || state.gizmoDrag) return;

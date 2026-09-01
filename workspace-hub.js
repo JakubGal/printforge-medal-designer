@@ -3,7 +3,7 @@ import {
   LANGUAGE_CHANGE_EVENT,
   getCurrentLocale,
   initializeLocalization,
-} from './localization-runtime.js?v=20260901-release36';
+} from './localization-runtime.js?v=20260901-release37';
 
 const legacyQuery = new URLSearchParams(window.location.search);
 if (legacyQuery.has('qa')) {

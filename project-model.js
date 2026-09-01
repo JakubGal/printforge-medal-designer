@@ -186,8 +186,74 @@ export function uid(prefix = 'item') {
   return `${prefix}-${token}`;
 }
 
+export const TEXT_ALIGNMENTS = Object.freeze(['left', 'center', 'right']);
+export const TEXT_MAX_CHARACTERS = 240;
+export const TEXT_MAX_LINES = 8;
+
+export function normalizeTextAlignment(value) {
+  return TEXT_ALIGNMENTS.includes(value) ? value : 'center';
+}
+
+export function normalizeTextLineHeight(value) {
+  const requested = Number(value);
+  return Number.isFinite(requested) ? Math.max(.85, Math.min(2, requested)) : 1.2;
+}
+
+export function normalizeTextValue(value, fallback = 'TEXT') {
+  const cleaned = String(value ?? '')
+    .replace(/\r\n?/gu, '\n')
+    .replace(/\t/gu, '    ')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu, '')
+    .normalize('NFC');
+  const limitedLines = cleaned.split('\n').slice(0, TEXT_MAX_LINES).join('\n');
+  const limited = [...limitedLines].slice(0, TEXT_MAX_CHARACTERS).join('');
+  return limited.trim() ? limited : fallback;
+}
+
+export function textLines(value, fallback = 'TEXT') {
+  return normalizeTextValue(value, fallback).split('\n');
+}
+
+export function textDisplayName(value) {
+  return textLines(value, '').find(line => line.trim())?.trim().slice(0, 24) || 'Text';
+}
+
+export function textBlockMetrics(element = {}) {
+  const fontSize = Math.max(.01, Number(element.fontSize) || 6);
+  const lines = textLines(element.text);
+  const familyFactor = element.fontFamily === 'Verdana' ? .62 : element.fontFamily === 'Georgia' ? .56 : .59;
+  // Keep the established single-line sizing contract while extending it to
+  // the longest line. Exact canvas measurement is used for paint alignment.
+  const widths = lines.map(line => Math.max(fontSize, [...line].length * fontSize * familyFactor));
+  const width = Math.max(fontSize, ...widths);
+  const lineHeight = normalizeTextLineHeight(element.lineHeight);
+  const lineAdvance = fontSize * lineHeight;
+  const height = fontSize * 1.05 + Math.max(0, lines.length - 1) * lineAdvance;
+  const alignment = normalizeTextAlignment(element.textAlign);
+  const anchorX = alignment === 'left' ? -width / 2 : alignment === 'right' ? width / 2 : 0;
+  return { alignment, anchorX, fontSize, height, lineAdvance, lineHeight, lines, width, widths };
+}
+
+export function drawTextBlock(context, element = {}, options = {}) {
+  const scale = Math.max(.0001, Number(options.scale) || 1);
+  const layout = textBlockMetrics(element);
+  const fontSize = layout.fontSize * scale;
+  const lineAdvance = layout.lineAdvance * scale;
+  context.font = `${element.weight || 800} ${fontSize}px ${element.fontFamily || 'Arial'}`;
+  context.textAlign = layout.alignment;
+  context.textBaseline = 'middle';
+  const measured = typeof context.measureText === 'function'
+    ? layout.lines.map(line => Number(context.measureText(line || ' ').width) || fontSize)
+    : layout.widths.map(width => width * scale);
+  const width = Math.max(fontSize, ...measured);
+  const x = layout.alignment === 'left' ? -width / 2 : layout.alignment === 'right' ? width / 2 : 0;
+  const startY = -(layout.lines.length - 1) * lineAdvance / 2;
+  layout.lines.forEach((line, index) => context.fillText(line || ' ', x, startY + index * lineAdvance));
+  return { ...layout, anchorX: x / scale, height: layout.height * scale, lineAdvance, width };
+}
+
 function text(name, value, x, y, size, color, weight = 800, options = {}) {
-  return { id: uid('text'), type: 'text', name, text: value, x, y, fontSize: size, fontFamily: 'Arial', weight, rotation: options.rotation || 0, scaleX: 1, scaleY: 1, lockAspect: true, face: options.face === 'back' ? 'back' : 'front', color, operation: options.operation || 'raise', zHeight: options.zHeight ?? .6, zDepth: options.zDepth ?? .4, inlayHeight: options.inlayHeight || 0, layerSnap: true, combine: options.combine === 'stack' ? 'stack' : 'replace', groupId: options.groupId || null, hidden: false, locked: false };
+  return { id: uid('text'), type: 'text', name, text: value, textAlign: normalizeTextAlignment(options.textAlign), lineHeight: normalizeTextLineHeight(options.lineHeight), x, y, fontSize: size, fontFamily: 'Arial', weight, rotation: options.rotation || 0, scaleX: 1, scaleY: 1, lockAspect: true, face: options.face === 'back' ? 'back' : 'front', color, operation: options.operation || 'raise', zHeight: options.zHeight ?? .6, zDepth: options.zDepth ?? .4, inlayHeight: options.inlayHeight || 0, layerSnap: true, combine: options.combine === 'stack' ? 'stack' : 'replace', groupId: options.groupId || null, hidden: false, locked: false };
 }
 function shape(name, kind, x, y, size, color, rotation = 0, options = {}) {
   return { id: uid('shape'), type: 'shape', name, shape: kind, x, y, size, color, rotation, scaleX: 1, scaleY: 1, lockAspect: true, face: options.face === 'back' ? 'back' : 'front', operation: options.operation || 'raise', zHeight: options.zHeight ?? .6, zDepth: options.zDepth ?? .4, inlayHeight: options.inlayHeight || 0, layerSnap: true, combine: options.combine === 'stack' ? 'stack' : 'replace', groupId: options.groupId || null, hidden: false, locked: false };
@@ -625,11 +691,13 @@ export function normalizeProject(input) {
     enforceFlatBackArtwork(element, project);
     element.locked = Boolean(element.locked);
     if (element.type === 'text') {
-      element.text = String(element.text || 'TEXT').slice(0, 80);
-      element.name = String(element.name || element.text || 'Text').slice(0, 40);
+      element.text = normalizeTextValue(element.text);
+      element.name = String(element.name || textDisplayName(element.text) || 'Text').replace(/\s+/gu, ' ').slice(0, 40);
       element.fontSize = clampNumber(element.fontSize, 1, DESIGN_LIMITS.textSizeMax, 6);
       element.weight = [700, 800, 900].includes(Number(element.weight)) ? Number(element.weight) : 800;
       element.fontFamily = ['Arial', 'Verdana', 'Georgia'].includes(element.fontFamily) ? element.fontFamily : 'Arial';
+      element.textAlign = normalizeTextAlignment(element.textAlign);
+      element.lineHeight = normalizeTextLineHeight(element.lineHeight);
     } else if (element.type === 'shape') {
       element.name = String(element.name || 'Shape').slice(0, 40);
       element.size = clampNumber(element.size, 1, DESIGN_LIMITS.shapeSizeMax, 11);
@@ -855,7 +923,10 @@ export function availability(filament) {
 export function elementBounds(element) {
   if (!element) return { x: 0, y: 0, width: 0, height: 0 };
   const scaleX = Math.max(.001, Number(element.scaleX) || 1), scaleY = Math.max(.001, Number(element.scaleY) || 1);
-  if (element.type === 'text') return { x: element.x, y: element.y, width: Math.max(element.fontSize, (element.text || '').length * element.fontSize * .59) * scaleX, height: element.fontSize * 1.05 * scaleY };
+  if (element.type === 'text') {
+    const block = textBlockMetrics(element);
+    return { x: element.x, y: element.y, width: block.width * scaleX, height: block.height * scaleY };
+  }
   if (element.type === 'shape') return { x: element.x, y: element.y, width: element.size * scaleX, height: element.size * scaleY };
   if (element.type === 'image') return { x: element.x, y: element.y, width: element.width * scaleX, height: element.height * scaleY };
   if (element.type === 'path') {

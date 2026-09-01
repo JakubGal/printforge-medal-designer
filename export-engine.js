@@ -1,5 +1,5 @@
 import { buildColumnField, columnFieldToMeshes, meshCellForProject, validateMesh } from './geometry-engine.js';
-import { enforceFlatBackArtwork, medalAttachmentGeometry, medalContainsPoint, normalizeFilament, offsetPolygon, presetMedalOutlinePoints, projectBackOffset, rimContainsPoint } from './project-model.js';
+import { drawTextBlock, enforceFlatBackArtwork, medalAttachmentGeometry, medalContainsPoint, normalizeFilament, offsetPolygon, presetMedalOutlinePoints, projectBackOffset, rimContainsPoint, textBlockMetrics } from './project-model.js';
 import { shapeSvgMarkup, traceShapePath } from './shape-library.js';
 
 const encoder = new TextEncoder();
@@ -258,8 +258,7 @@ async function renderOperations(project, bounds, cell, baseMask) {
     } else if (element.type === 'text') {
       paintLayer(element.color, context => {
         context.save(); applyTransform(context);
-        context.textAlign = 'center'; context.textBaseline = 'middle'; context.font = `${element.weight || 800} ${element.fontSize}px ${element.fontFamily || 'Arial'}`;
-        context.fillText(element.text || '', 0, 0); context.restore();
+        drawTextBlock(context, element); context.restore();
       });
     } else if (element.type === 'shape') {
       paintLayer(element.color, context => {
@@ -869,7 +868,13 @@ export function projectToSvg(project) {
     const transform = `translate(${element.x} ${outsideY}) rotate(${outsideRotation}) scale(${element.scaleX || 1} ${element.scaleY || 1})`;
     const operation = `data-face="${face}" data-operation="${escapeXml(element.operation || 'raise')}" data-height-mm="${element.zHeight || 0}" data-depth-mm="${element.zDepth || 0}"`;
     const visualColor = element.operation === 'engrave' ? '#111714' : element.operation === 'cut' ? '#ffffff' : color;
-    if (element.type === 'text') parts.push(`<text transform="${transform}" text-anchor="middle" dominant-baseline="middle" font-family="${escapeXml(element.fontFamily || 'Arial')}" font-size="${element.fontSize}" font-weight="${element.weight || 800}" fill="${visualColor}" ${operation}>${escapeXml(element.text)}</text>`);
+    if (element.type === 'text') {
+      const layout = textBlockMetrics(element);
+      const textAnchor = layout.alignment === 'left' ? 'start' : layout.alignment === 'right' ? 'end' : 'middle';
+      const firstY = -(layout.lines.length - 1) * layout.lineAdvance / 2;
+      const lines = layout.lines.map((line, index) => `<tspan x="${layout.anchorX}" y="${firstY + index * layout.lineAdvance}">${escapeXml(line)}</tspan>`).join('');
+      parts.push(`<text transform="${transform}" text-anchor="${textAnchor}" dominant-baseline="middle" xml:space="preserve" font-family="${escapeXml(element.fontFamily || 'Arial')}" font-size="${element.fontSize}" font-weight="${element.weight || 800}" fill="${visualColor}" data-text-align="${layout.alignment}" data-line-height="${layout.lineHeight}" ${operation}>${lines}</text>`);
+    }
     else if (element.type === 'shape') parts.push(`<g transform="${transform}" fill="${visualColor}" ${operation}>${svgShape(element)}</g>`);
     else if (element.type === 'image') parts.push(`<image transform="${transform}" x="${-element.width/2}" y="${-element.height/2}" width="${element.width}" height="${element.height}" href="${escapeXml(element.dataUrl)}" ${operation}/>`);
     else if (element.type === 'path') {

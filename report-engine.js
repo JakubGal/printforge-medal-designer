@@ -7,6 +7,7 @@ import {
   medalAttachmentGeometry,
   presetMedalOutlinePoints,
   projectUsedSlots,
+  textLines,
 } from './project-model.js';
 import { projectToSvg, safeFilename } from './export-engine.js';
 
@@ -263,7 +264,9 @@ export function projectFaceToTechnicalSvg(project, face = 'front', options = {})
 
 function faceSummary(project, face) {
   const elements = project.elements.filter(element => !element.hidden && (element.face === 'back' ? 'back' : 'front') === face);
-  const textItems = [...new Set(elements.filter(element => element.type === 'text').map(element => String(element.text || '').trim()).filter(Boolean))];
+  const textItems = [...new Set(elements.filter(element => element.type === 'text').map(element => (
+    textLines(element.text, '').map(line => line.trim().replace(/\s+/gu, ' ')).filter(Boolean).join(' / ')
+  )).filter(Boolean))];
   const slots = new Set([project.medal.baseColor]);
   if (project.medal.rimWidth > 0) slots.add(project.medal.rimColor);
   if (face === 'front' && Number.isInteger(project.medal.attachmentColor) && Number(project.medal.attachmentHeight) > 0) slots.add(project.medal.attachmentColor);
