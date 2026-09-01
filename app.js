@@ -76,7 +76,7 @@ import {
   localizeSubtree,
   translateUi,
   translateUiKey,
-} from './localization-runtime.js?v=20260901-release35';
+} from './localization-runtime.js?v=20260901-release36';
 
 const QA_FIXTURE_ALIASES = Object.freeze({
   'final-premium-medal': 'showcase-night',
@@ -242,6 +242,7 @@ const state = {
   ribbonPreviewVisible: qaTemplate ? false : localStorage.getItem('medalforge-ribbon-visible') === '1',
   ribbonPreviewColor: qaTemplate ? '#2458d8' : localStorage.getItem('medalforge-ribbon-color') || '#2458d8',
   onboardingDismissed: qaTemplate ? true : localStorage.getItem('medalforge-onboarding-dismissed') === '1',
+  canvasEmptyDismissedProjectId: qaTemplate ? '' : localStorage.getItem('medalforge-empty-card-dismissed-project') || '',
   drawing: {
     mode: 'select', face: 'front', strokeWidth: .9, color: 1, operation: 'raise', height: .6, depth: .4, snap: true, grid: .5,
     active: false, pointerId: null, points: [], hover: null, before: null,
@@ -4436,6 +4437,21 @@ function drawRimStylePreview(context, metrics, palette) {
   context.restore();
 }
 
+function updateCanvasEmptyVisibility(hasArtwork) {
+  const prompt = $('#canvasEmpty');
+  if (!prompt) return;
+  const dismissed = Boolean(state.project?.id && state.canvasEmptyDismissedProjectId === state.project.id);
+  prompt.hidden = Boolean(hasArtwork || dismissed);
+}
+
+function dismissCanvasEmpty() {
+  if (!state.project?.id) return;
+  state.canvasEmptyDismissedProjectId = state.project.id;
+  try { setLocalPreference('medalforge-empty-card-dismissed-project', state.project.id); } catch {}
+  $('#canvasEmpty').hidden = true;
+  modelCanvas?.focus({ preventScroll: true });
+}
+
 function drawMedal() {
   if (!state.project) return;
   const metrics = viewMetrics();
@@ -4460,7 +4476,7 @@ function drawMedal() {
     drawSelection(ctx, metrics);
     drawDrawingOverlay(ctx, metrics);
     ctx.restore();
-    $('#canvasEmpty').hidden = state.project.elements.some(element => !element.hidden && element.face === state.drawing.face);
+    updateCanvasEmptyVisibility(state.project.elements.some(element => !element.hidden && element.face === state.drawing.face));
     const side = translateUiKey(state.drawing.face === 'back' ? 'stage.drawSideBack' : 'stage.drawSideFront');
     const drawHints = { select: translateUiKey('stage.drawSelectFace'), brush: translateUiKey('stage.drawOnFace', { side }), line: translateUiKey('stage.drawLine'), polygon: translateUiKey('stage.drawPolygon'), erase: translateUiKey('stage.drawErase'), measure: translateUiKey('stage.drawMeasure') };
     $('#stageHint').textContent = translateUiKey('stage.drawingHint', { hint: drawHints[state.drawing.mode], view: translateUiKey(state.drawing.face === 'back' ? 'stage.viewedBack' : 'stage.viewedFront'), finish: translateUiKey('stage.finishSketchOrbit') });
@@ -4506,7 +4522,7 @@ function drawMedal() {
   drawSelection(ctx,metrics);
   drawDrawingOverlay(ctx, metrics);
   ctx.restore();
-  $('#canvasEmpty').hidden = state.project.elements.some(element => !element.hidden);
+  updateCanvasEmptyVisibility(state.project.elements.some(element => !element.hidden));
   const drawHints = { select: translateUiKey('workspace.selectDrag'), brush: translateUiKey('stage.drawStroke'), line: translateUiKey('stage.drawSnappedLine'), polygon: translateUiKey('stage.drawPolygon'), erase: translateUiKey('stage.drawErase'), measure: translateUiKey('stage.drawMeasure') };
   const selected = selectedElement();
   $('#stageHint').textContent = state.view === '2d' ? drawHints[state.drawing.mode] : state.view === '3d' ? (state.pendingInsert ? translateUiKey('stage.pendingPlacement', { name: state.pendingInsert.label }) : selected ? translateUiKey(selected.face === 'back' ? 'stage.selectedBack' : 'stage.selectedFront', { name: selected.name }) : translateUiKey('stage.orbit')) : translateUi('Building exact printable layers on this device…');
@@ -7892,6 +7908,7 @@ function bindStaticEvents() {
       sidePanel.classList[shouldOpen ? 'add' : 'remove']('mobile-open');
     }
   }));
+  $('#dismissCanvasEmpty')?.addEventListener('click', dismissCanvasEmpty);
   $('#newDesignButton').addEventListener('click', openNewDesignWizard);
   $('#newDesignRailButton').addEventListener('click', openNewDesignWizard);
   $('#examplesButton').addEventListener('click', openTemplateGallery);
@@ -7993,6 +8010,7 @@ function bindStaticEvents() {
     if (event.key === 'Tab' && !$('#templateGallery').hidden && trapModalFocus(event, $('#templateGallery'))) return;
     if (event.key === 'Tab' && !$('#globalSettingsDrawer').hidden && trapModalFocus(event, $('#globalSettingsDrawer'))) return;
     if(event.key==='Escape'&&dialog.open){closeDialog();return;}
+    if(event.key==='Escape'&&!$('#canvasEmpty').hidden){event.preventDefault();dismissCanvasEmpty();return;}
     if(event.key==='Escape'&&!$('#templateGallery').hidden){closeTemplateGallery();return;}
     if(event.key==='Escape'&&!$('#globalSettingsDrawer').hidden){closeGlobalSettings();return;}
     if (event.key === 'Escape' && state.liveEdit) { event.preventDefault(); cancelLiveEdit(); return; }

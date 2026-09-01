@@ -28,6 +28,22 @@ test('the 3D workspace exposes camera and keyboard controls accessibly', async (
   assert.match(html, /id="a11yStatus"[^>]*aria-live="polite"/);
 });
 
+test('the empty-medal add card can be dismissed without returning after a redraw', async () => {
+  const [html, app, styles] = await Promise.all([
+    read('workspaces/medals/index.html'),
+    read('app.js'),
+    read('styles.css'),
+  ]);
+  assert.match(html, /id="dismissCanvasEmpty"[^>]*aria-label="Close"/);
+  assert.match(app, /canvasEmptyDismissedProjectId/);
+  assert.match(app, /medalforge-empty-card-dismissed-project/);
+  assert.match(app, /function updateCanvasEmptyVisibility/);
+  assert.match(app, /function dismissCanvasEmpty/);
+  assert.match(app, /Escape'&&!\$\('#canvasEmpty'\)\.hidden/);
+  assert.match(styles, /\.canvas-empty-close/);
+  assert.match(styles, /\.canvas-empty-close \{ min-width: 44px; min-height: 44px; \}/);
+});
+
 test('beginner creation controls include safe text fitting and the expanded symbol library', async () => {
   const [app, shapes] = await Promise.all([read('app.js'), read('shape-library.js')]);
   for (const phrase of ['Auto-fit long text', 'Starting position', 'Classic serif']) assert.match(app, new RegExp(phrase));
@@ -88,9 +104,9 @@ test('plain-language operations replace the old visible CAD labels', async () =>
 
 test('cache-busted release assets and static hosting validation stay aligned', async () => {
   const [hub, studio] = await Promise.all([read('index.html'), read('workspaces/medals/index.html')]);
-  assert.match(hub, /release35/);
-  assert.match(studio, /styles\.css\?v=20260901-release35/);
-  assert.match(studio, /app\.js\?v=20260901-release35/);
+  assert.match(hub, /release36/);
+  assert.match(studio, /styles\.css\?v=20260901-release36/);
+  assert.match(studio, /app\.js\?v=20260901-release36/);
 });
 
 test('Render Studio reuses the live medal safely and exposes complete image workflows', async () => {
@@ -145,7 +161,7 @@ test('project safety and export cancellation keep their asynchronous guarantees'
   assert.match(app, /productionKinds\.has\(button\.dataset\.export\) && blocked/);
   assert.match(sync, /'shape-library\.js'/);
   assert.match(sync, /'guide-library\.js'/);
-  assert.match(sync, /20260901-release35/);
+  assert.match(sync, /20260901-release36/);
 });
 
 test('quick video guides use one accessible captioned player and keep the interactive guide available', async () => {
