@@ -246,6 +246,20 @@ export const VIEWER_FRAGMENT_SHADER = `
   precision mediump float;
   uniform vec4 uColor;
   uniform vec3 uCamera;
+  uniform vec3 uLightDirection;
+  uniform float uAmbientStrength;
+  uniform float uKeyStrength;
+  uniform float uFillStrength;
+  uniform float uRimStrength;
+  uniform float uExposure;
+  uniform vec3 uEmissionColor;
+  uniform float uEmissionStrength;
+  uniform float uSpecularStrength;
+  uniform float uSpecularPower;
+  uniform float uSparkleStrength;
+  uniform float uPatternStrength;
+  uniform float uSurfaceEffect;
+  uniform float uAlbedoStrength;
   uniform float uUnlit;
   uniform float uClipZ;
   uniform float uOpacity;
@@ -256,26 +270,45 @@ export const VIEWER_FRAGMENT_SHADER = `
   varying vec3 vNormal;
   varying vec3 vWorld;
   varying float vModelZ;
+  float hash21(vec2 point) {
+    return fract(sin(dot(point, vec2(127.1, 311.7))) * 43758.5453);
+  }
   void main() {
     if (vModelZ > uClipZ + 0.0001) discard;
     vec3 normal = normalize(vNormal);
-    vec3 light = normalize(vec3(-0.35, -0.45, 0.82));
+    vec3 light = normalize(uLightDirection);
     // CAD work routinely happens on the underside. A weaker opposite fill
     // keeps back-face colors readable after the camera snaps underneath while
     // retaining enough directional contrast to judge relief and pockets.
     float keyDiffuse = max(dot(normal, light), 0.0);
-    float fillDiffuse = max(dot(normal, -light), 0.0) * 0.72;
-    float diffuse = max(keyDiffuse, fillDiffuse);
+    float fillDiffuse = max(dot(normal, -light), 0.0);
+    float diffuse = max(keyDiffuse * uKeyStrength, fillDiffuse * uFillStrength);
     vec3 viewDirection = normalize(uCamera - vWorld);
-    vec3 activeLight = keyDiffuse >= fillDiffuse ? light : -light;
+    vec3 activeLight = keyDiffuse * uKeyStrength >= fillDiffuse * uFillStrength ? light : -light;
     vec3 halfway = normalize(activeLight + viewDirection);
-    float specular = pow(max(dot(normal, halfway), 0.0), 34.0) * 0.24;
-    float rim = pow(1.0 - max(dot(normal, viewDirection), 0.0), 2.0) * 0.12;
-    vec3 lit = uColor.rgb * (0.40 + diffuse * 0.66 + rim) + vec3(specular);
+    float sceneLight = max(uKeyStrength, uFillStrength);
+    float specular = pow(max(dot(normal, halfway), 0.0), max(4.0, uSpecularPower)) * uSpecularStrength * sceneLight;
+    float rim = pow(1.0 - max(dot(normal, viewDirection), 0.0), 2.0) * uRimStrength;
+    vec3 surfaceColor = uColor.rgb * uAlbedoStrength;
+    if (uSurfaceEffect > 1.5 && uSurfaceEffect < 2.5) {
+      float grain = sin(vWorld.x * 3.2 + sin(vWorld.y * 0.72) * 2.1) * 0.5 + 0.5;
+      surfaceColor *= mix(0.78, 1.12, grain * uPatternStrength + (1.0 - uPatternStrength) * 0.5);
+    } else if (uSurfaceEffect > 2.5 && uSurfaceEffect < 3.5) {
+      vec2 weave = abs(fract(vWorld.xy * 1.7) - 0.5);
+      float carbon = step(0.33, max(weave.x, weave.y));
+      surfaceColor *= mix(0.76, 1.08, mix(0.5, carbon, uPatternStrength));
+    } else if (uSurfaceEffect > 3.5) {
+      float shift = sin(vWorld.x * 0.24 + vWorld.y * 0.17) * 0.5 + 0.5;
+      surfaceColor = mix(surfaceColor, vec3(0.96, 0.58, 0.12), shift * uPatternStrength * 0.32);
+    }
+    float glitterSeed = hash21(floor(vWorld.xy * 8.0) + floor(vWorld.z * 17.0));
+    float glitter = step(0.985, glitterSeed) * uSparkleStrength * (0.35 + max(dot(normal, halfway), 0.0)) * (0.18 + sceneLight);
+    vec3 lit = surfaceColor * (uAmbientStrength + diffuse + rim) + vec3(specular + glitter);
     float planeDistance = abs(dot(vWorld - uHoverPoint, normalize(uHoverNormal)));
     vec3 tangent = (vWorld - uHoverPoint) - normalize(uHoverNormal) * dot(vWorld - uHoverPoint, normalize(uHoverNormal));
     float hoverMask = uHoverActive * step(planeDistance, 0.09) * (1.0 - smoothstep(uHoverRadius * 0.72, uHoverRadius, length(tangent))) * step(0.62, abs(dot(normal, normalize(uHoverNormal))));
-    vec3 finalColor = mix(mix(lit, uColor.rgb, uUnlit), vec3(0.20, 0.47, 1.0), hoverMask * 0.38);
+    vec3 exposed = (lit + uEmissionColor * uEmissionStrength) * uExposure;
+    vec3 finalColor = mix(mix(exposed, surfaceColor, uUnlit), vec3(0.20, 0.47, 1.0), hoverMask * 0.38);
     gl_FragColor = vec4(finalColor, uColor.a * uOpacity);
   }
 `;
@@ -299,6 +332,20 @@ export class MedalViewer3D {
       planarMatrix: gl.getUniformLocation(this.program, 'uPlanarMatrix'),
       color: gl.getUniformLocation(this.program, 'uColor'),
       camera: gl.getUniformLocation(this.program, 'uCamera'),
+      lightDirection: gl.getUniformLocation(this.program, 'uLightDirection'),
+      ambientStrength: gl.getUniformLocation(this.program, 'uAmbientStrength'),
+      keyStrength: gl.getUniformLocation(this.program, 'uKeyStrength'),
+      fillStrength: gl.getUniformLocation(this.program, 'uFillStrength'),
+      rimStrength: gl.getUniformLocation(this.program, 'uRimStrength'),
+      exposure: gl.getUniformLocation(this.program, 'uExposure'),
+      emissionColor: gl.getUniformLocation(this.program, 'uEmissionColor'),
+      emissionStrength: gl.getUniformLocation(this.program, 'uEmissionStrength'),
+      specularStrength: gl.getUniformLocation(this.program, 'uSpecularStrength'),
+      specularPower: gl.getUniformLocation(this.program, 'uSpecularPower'),
+      sparkleStrength: gl.getUniformLocation(this.program, 'uSparkleStrength'),
+      patternStrength: gl.getUniformLocation(this.program, 'uPatternStrength'),
+      surfaceEffect: gl.getUniformLocation(this.program, 'uSurfaceEffect'),
+      albedoStrength: gl.getUniformLocation(this.program, 'uAlbedoStrength'),
       clipZ: gl.getUniformLocation(this.program, 'uClipZ'),
       opacity: gl.getUniformLocation(this.program, 'uOpacity'),
       hoverActive: gl.getUniformLocation(this.program, 'uHoverActive'),
@@ -314,6 +361,11 @@ export class MedalViewer3D {
     this.proxyTransform = { x: 0, y: 0, zScale: 1, zOffset: 0, planarOriginX: 0, planarOriginY: 0, planarMatrix: [1, 0, 0, 1], opacity: .34, color: '#2e68ff' };
     this.hoverSurface = null;
     this.visibility = new Map();
+    this.materials = new Map();
+    this.renderScene = {
+      background: '#ecf0e8', transparent: false, lightDirection: [-0.35, -0.45, 0.82],
+      ambient: 0.40, key: 0.66, fill: 0.48, rim: 0.12, exposure: 1,
+    };
     this.baseSlot = 0;
     this.bounds = { min: [-30, -30, 0], max: [30, 30, 3] };
     this.modelBounds = { min: [-30, -30, 0], max: [30, 30, 3] };
@@ -551,6 +603,73 @@ export class MedalViewer3D {
   setBaseSlot(slot = 0) { this.baseSlot = Math.max(0, Math.floor(Number(slot) || 0)); this.render(); }
   setVisibility(slot, visible) { this.visibility.set(Number(slot), Boolean(visible)); this.render(); }
   setColor(slot, color) { const meshes = this.meshes.filter(item => item.slot === Number(slot)); for (const mesh of meshes) mesh.color = parseColor(color); if (meshes.length) this.render(); }
+  setMaterial(slot, material = {}) {
+    this.materials.set(Number(slot), {
+      emissionColor: parseColor(material.emissionColor || '#000000'),
+      emission: Math.max(0, Math.min(4, Number(material.emission) || 0)),
+      specular: Math.max(0, Math.min(1.6, Number(material.specular ?? .24) || 0)),
+      shininess: Math.max(4, Math.min(160, Number(material.shininess ?? 34) || 4)),
+      sparkle: Math.max(0, Math.min(2, Number(material.sparkle) || 0)),
+      pattern: Math.max(0, Math.min(1, Number(material.pattern) || 0)),
+      surfaceEffect: Math.max(0, Math.min(4, Number(material.surfaceEffect) || 0)),
+      albedo: Math.max(0, Math.min(1.5, Number(material.albedo ?? 1) || 0)),
+    });
+    this.render();
+  }
+  setMaterials(materials = []) {
+    this.materials.clear();
+    const entries = materials instanceof Map ? [...materials] : Array.isArray(materials) ? materials : Object.entries(materials || {});
+    for (const [slot, material] of entries) {
+      const source = material || {};
+      this.materials.set(Number(slot), {
+        emissionColor: Array.isArray(source.emissionColor) ? [...source.emissionColor] : parseColor(source.emissionColor || '#000000'),
+        emission: Math.max(0, Math.min(4, Number(source.emission) || 0)),
+        specular: Math.max(0, Math.min(1.6, Number(source.specular ?? .24) || 0)),
+        shininess: Math.max(4, Math.min(160, Number(source.shininess ?? 34) || 4)),
+        sparkle: Math.max(0, Math.min(2, Number(source.sparkle) || 0)),
+        pattern: Math.max(0, Math.min(1, Number(source.pattern) || 0)),
+        surfaceEffect: Math.max(0, Math.min(4, Number(source.surfaceEffect) || 0)),
+        albedo: Math.max(0, Math.min(1.5, Number(source.albedo ?? 1) || 0)),
+      });
+    }
+    this.render();
+  }
+  setRenderScene(scene = {}) {
+    const direction = Array.isArray(scene.lightDirection) && scene.lightDirection.length === 3
+      ? normalize(scene.lightDirection.map(value => Number(value) || 0)) : this.renderScene.lightDirection;
+    this.renderScene = {
+      ...this.renderScene,
+      ...scene,
+      background: typeof scene.background === 'string' ? scene.background : this.renderScene.background,
+      transparent: scene.transparent === undefined ? this.renderScene.transparent : Boolean(scene.transparent),
+      lightDirection: direction,
+      ambient: Math.max(0, Math.min(2, Number(scene.ambient ?? this.renderScene.ambient) || 0)),
+      key: Math.max(0, Math.min(2.5, Number(scene.key ?? this.renderScene.key) || 0)),
+      fill: Math.max(0, Math.min(2.5, Number(scene.fill ?? this.renderScene.fill) || 0)),
+      rim: Math.max(0, Math.min(1.5, Number(scene.rim ?? this.renderScene.rim) || 0)),
+      exposure: Math.max(.1, Math.min(3, Number(scene.exposure ?? this.renderScene.exposure) || 1)),
+    };
+    this.render();
+  }
+  sceneState() {
+    return {
+      camera: this.cameraState(),
+      renderScene: { ...this.renderScene, lightDirection: [...this.renderScene.lightDirection] },
+      materials: [...this.materials].map(([slot, material]) => [slot, { ...material, emissionColor: [...material.emissionColor] }]),
+      showGrid: this.showGrid,
+      explode: this.explode,
+      clipZ: this.clipZ,
+    };
+  }
+  restoreScene(scene = {}) {
+    if (scene.camera) this.restoreCamera(scene.camera);
+    if (scene.renderScene) this.setRenderScene(scene.renderScene);
+    if (scene.materials) this.setMaterials(scene.materials);
+    if (scene.showGrid !== undefined) this.showGrid = Boolean(scene.showGrid);
+    if (scene.explode !== undefined) this.explode = Math.max(0, Number(scene.explode) || 0);
+    if (scene.clipZ !== undefined) this.clipZ = Number.isFinite(Number(scene.clipZ)) ? Number(scene.clipZ) : 1e6;
+    this.render();
+  }
   setExplode(value) { this.explode = Math.max(0, Number(value) || 0); this.render(); }
   setClipZ(value) { this.clipZ = Number.isFinite(Number(value)) ? Number(value) : 1e6; this.render(); }
   setGrid(visible) { this.showGrid = Boolean(visible); this.render(); }
@@ -609,13 +728,20 @@ export class MedalViewer3D {
     const gl = this.gl;
     if (!gl || gl.isContextLost()) return;
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    gl.clearColor(0.925, 0.933, 0.91, 1);
+    const background = parseColor(this.renderScene.background);
+    gl.clearColor(background[0], background[1], background[2], this.renderScene.transparent ? 0 : 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.useProgram(this.program);
     const eye = this.cameraPosition();
     gl.uniformMatrix4fv(this.locations.view, false, lookAt(eye, this.target, [0, 0, 1]));
     gl.uniformMatrix4fv(this.locations.projection, false, this.projectionMatrix());
     gl.uniform3fv(this.locations.camera, eye);
+    gl.uniform3fv(this.locations.lightDirection, this.renderScene.lightDirection);
+    gl.uniform1f(this.locations.ambientStrength, this.renderScene.ambient);
+    gl.uniform1f(this.locations.keyStrength, this.renderScene.key);
+    gl.uniform1f(this.locations.fillStrength, this.renderScene.fill);
+    gl.uniform1f(this.locations.rimStrength, this.renderScene.rim);
+    gl.uniform1f(this.locations.exposure, this.renderScene.exposure);
     gl.uniform1f(this.locations.clipZ, this.clipZ);
     gl.uniform1f(this.locations.scaleZ, 1);
     gl.uniform1f(this.locations.zOffset, 0);
@@ -627,6 +753,18 @@ export class MedalViewer3D {
     gl.uniform3fv(this.locations.hoverPoint, hover?.point || [0, 0, 0]);
     gl.uniform3fv(this.locations.hoverNormal, hover?.normal || [0, 0, 1]);
     gl.uniform1f(this.locations.hoverRadius, hover?.radius || 1);
+    const applyMaterial = (material = {}) => {
+      const emissionColor = material.emissionColor || [0, 0, 0, 1];
+      gl.uniform3f(this.locations.emissionColor, emissionColor[0] || 0, emissionColor[1] || 0, emissionColor[2] || 0);
+      gl.uniform1f(this.locations.emissionStrength, Number(material.emission) || 0);
+      gl.uniform1f(this.locations.specularStrength, Number(material.specular ?? .24));
+      gl.uniform1f(this.locations.specularPower, Number(material.shininess ?? 34));
+      gl.uniform1f(this.locations.sparkleStrength, Number(material.sparkle) || 0);
+      gl.uniform1f(this.locations.patternStrength, Number(material.pattern) || 0);
+      gl.uniform1f(this.locations.surfaceEffect, Number(material.surfaceEffect) || 0);
+      gl.uniform1f(this.locations.albedoStrength, Number(material.albedo ?? 1));
+    };
+    applyMaterial();
     if (this.showGrid && this.grid && eye[2] >= this.bounds.min[2] - .001) {
       this.bindAttributes(this.grid);
       gl.uniform3f(this.locations.offset, 0, 0, 0);
@@ -644,9 +782,11 @@ export class MedalViewer3D {
       const offset = mesh.slot === this.baseSlot ? [0, 0, 0] : [0, 0, (mesh.slot - this.baseSlot || 1) * this.explode];
       gl.uniform3fv(this.locations.offset, offset);
       gl.uniform4fv(this.locations.color, mesh.color);
+      applyMaterial(this.materials.get(mesh.slot));
       gl.drawArrays(gl.TRIANGLES, 0, mesh.count);
     }
     gl.uniform1f(this.locations.unlit, .2);
+    applyMaterial();
     for (const mesh of this.sectionMeshes) {
       if (this.visibility.get(mesh.slot) === false) continue;
       this.bindAttributes(mesh);
@@ -656,6 +796,7 @@ export class MedalViewer3D {
       gl.drawArrays(gl.TRIANGLES, 0, mesh.count);
     }
     if (this.decorMeshes.length) {
+      applyMaterial();
       gl.uniform1f(this.locations.clipZ, 1e6);
       gl.uniform1f(this.locations.unlit, .18);
       gl.disable(gl.CULL_FACE);
@@ -671,6 +812,7 @@ export class MedalViewer3D {
       gl.uniform1f(this.locations.clipZ, this.clipZ);
     }
     if (this.proxyMeshes.length) {
+      applyMaterial();
       const proxy = this.proxyTransform;
       gl.disable(gl.DEPTH_TEST);
       gl.uniform1f(this.locations.clipZ, 1e6);
@@ -853,6 +995,7 @@ export class MedalViewer3D {
   }
 
   resize() {
+    if (this.exporting) return;
     const rect = this.canvas.getBoundingClientRect();
     const { width, height } = viewerBufferSize(rect.width, rect.height, globalThis.devicePixelRatio || 1, {
       pixelBudget: this.pixelBudget,
@@ -865,10 +1008,31 @@ export class MedalViewer3D {
     this.render();
   }
 
-  async toPngBlob() {
+  async toPngBlob(options = {}) {
+    const originalWidth = this.canvas.width;
+    const originalHeight = this.canvas.height;
+    const requestedWidth = Math.round(Number(options.width) || originalWidth);
+    const requestedHeight = Math.round(Number(options.height) || originalHeight);
+    const exportPixelBudget = Math.max(this.pixelBudget, Math.min(9_437_184, Number(options.pixelBudget) || 9_437_184));
+    const dimensionScale = Math.min(1, this.maxViewportDimension / Math.max(requestedWidth, requestedHeight), Math.sqrt(exportPixelBudget / Math.max(1, requestedWidth * requestedHeight)));
+    if ((options.width || options.height) && dimensionScale < .9999) {
+      throw new Error(`This device cannot create the requested ${requestedWidth} × ${requestedHeight} image safely. Choose a smaller image size.`);
+    }
+    const width = Math.max(2, Math.round(requestedWidth * dimensionScale));
+    const height = Math.max(2, Math.round(requestedHeight * dimensionScale));
     if (this.frame) { cancelAnimationFrame(this.frame); this.frame = 0; }
-    this.renderNow();
-    return new Promise((resolve, reject) => this.canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Preview image could not be created')), 'image/png'));
+    this.exporting = true;
+    try {
+      if (this.canvas.width !== width) this.canvas.width = width;
+      if (this.canvas.height !== height) this.canvas.height = height;
+      this.renderNow();
+      return await new Promise((resolve, reject) => this.canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Preview image could not be created')), 'image/png'));
+    } finally {
+      this.canvas.width = originalWidth;
+      this.canvas.height = originalHeight;
+      this.exporting = false;
+      this.renderNow();
+    }
   }
 
   destroy() {

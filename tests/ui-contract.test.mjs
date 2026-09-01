@@ -24,7 +24,7 @@ test('static editor IDs are unique and include the novice project controls', asy
 test('the 3D workspace exposes camera and keyboard controls accessibly', async () => {
   const html = await read('workspaces/medals/index.html');
   assert.match(html, /id="modelCanvas"[^>]*tabindex="0"[^>]*Keyboard:/);
-  for (const label of ['3D', 'Front side', 'Back side', 'Edge', 'Side', 'Fit view', 'Print layers', 'Snapshot']) assert.match(html, new RegExp(`>${label}<`));
+  for (const label of ['3D', 'Front side', 'Back side', 'Edge', 'Side', 'Fit view', 'Print layers', 'Render images']) assert.match(html, new RegExp(`>${label}<`));
   assert.match(html, /id="a11yStatus"[^>]*aria-live="polite"/);
 });
 
@@ -88,9 +88,38 @@ test('plain-language operations replace the old visible CAD labels', async () =>
 
 test('cache-busted release assets and static hosting validation stay aligned', async () => {
   const [hub, studio] = await Promise.all([read('index.html'), read('workspaces/medals/index.html')]);
-  assert.match(hub, /release30/);
-  assert.match(studio, /styles\.css\?v=20260831-release30/);
-  assert.match(studio, /app\.js\?v=20260831-release30/);
+  assert.match(hub, /release34/);
+  assert.match(studio, /styles\.css\?v=20260901-release34/);
+  assert.match(studio, /app\.js\?v=20260901-release34/);
+});
+
+test('Render Studio reuses the live medal safely and exposes complete image workflows', async () => {
+  const [studio, app, viewer, renderStudio, styles, sync] = await Promise.all([
+    read('workspaces/medals/index.html'),
+    read('app.js'),
+    read('viewer3d.js'),
+    read('render-studio.js'),
+    read('styles.css'),
+    read('sync-static.mjs'),
+  ]);
+  assert.match(studio, /id="savePreview"[^>]*>Render images</);
+  for (const hook of ['openRenderStudio', 'captureRenderStudioImage', 'composeImageGrid', 'renderCompareDownload', 'renderViewsDownload']) {
+    assert.match(app, new RegExp(hook));
+  }
+  assert.match(app, /state\.viewer\.sceneState\(\)/);
+  assert.match(app, /renderStudioCanvasHost[^\n]+prepend\(modelCanvas\)/);
+  assert.match(app, /session\.viewer\.restoreScene\(session\.editorScene\)/);
+  assert.match(app, /\$\('#dialogBody'\)\.scrollTop = 0/);
+  assert.match(app, /settings\.mode === 'glow'/);
+  assert.match(viewer, /uniform float uEmissionStrength/);
+  assert.match(viewer, /uniform float uAlbedoStrength/);
+  assert.match(viewer, /async toPngBlob\(options = \{\}\)/);
+  assert.match(viewer, /cannot create the requested/);
+  assert.match(renderStudio, /RENDER_EXPORT_RESOLUTIONS/);
+  assert.match(renderStudio, /flags\.glow && darkScene/);
+  assert.match(styles, /\.render-studio-dialog/);
+  assert.match(styles, /\.render-preview-shell #modelCanvas/);
+  assert.match(sync, /'render-studio\.js'/);
 });
 
 test('phone, touch, reduced-motion, and high-contrast contracts remain present', async () => {
@@ -116,7 +145,7 @@ test('project safety and export cancellation keep their asynchronous guarantees'
   assert.match(app, /productionKinds\.has\(button\.dataset\.export\) && blocked/);
   assert.match(sync, /'shape-library\.js'/);
   assert.match(sync, /'guide-library\.js'/);
-  assert.match(sync, /20260831-release30/);
+  assert.match(sync, /20260901-release34/);
 });
 
 test('quick video guides use one accessible captioned player and keep the interactive guide available', async () => {

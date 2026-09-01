@@ -39,6 +39,7 @@ const REQUIRED_SECTIONS = [
   'pricing',
   'export',
   'guides',
+  'renderStudio',
   'status',
   'errors',
   'accessibility',
@@ -63,7 +64,7 @@ const REQUIRED_VISIBLE_MESSAGES = [
   'Back side',
   'Fit view',
   'Print layers',
-  'Snapshot',
+  'Render images',
   'Printer & materials',
   'Colors in this medal',
   'Nozzle size',
@@ -83,6 +84,10 @@ const REQUIRED_DYNAMIC_MESSAGES = [
   'Continue in CAD',
   'Restart interactive guide',
   'Start a new medal',
+  'Medal image studio',
+  'Glow preview',
+  'Light + dark image',
+  '4-view sheet',
 ];
 
 const REQUIRED_DIACRITICS = {
@@ -263,7 +268,14 @@ test('persistent visible editor labels are represented in the localization catal
   }
 
   for (const message of REQUIRED_DYNAMIC_MESSAGES) {
-    const explicitlyKeyed = message === 'No blocking issues' && app.includes("localizedPluralMessage('export.warnings'");
+    const renderStudioKeys = {
+      'Medal image studio': "renderStudioText('title')",
+      'Glow preview': "renderStudioText('glow')",
+      'Light + dark image': "renderStudioText('lightDarkImage')",
+      '4-view sheet': "renderStudioText('fourViewSheet')",
+    };
+    const explicitlyKeyed = (message === 'No blocking issues' && app.includes("localizedPluralMessage('export.warnings'"))
+      || (renderStudioKeys[message] && app.includes(renderStudioKeys[message]));
     assert.ok(app.includes(message) || explicitlyKeyed, `test fixture drift: expected app.js to contain “${message}” or its explicit localization key`);
     assert.ok(englishValues.has(normalizedText(message)), `dynamic editor label “${message}” is absent from the localization catalog`);
   }

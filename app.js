@@ -62,6 +62,12 @@ import { RUNTIME_CONFIG, unavailableHostedCapability } from './runtime-config.js
 import { attachmentOpeningLabel, medalOverallSizeLabel, medalSizeLabel, medalTopViewSvg } from './medal-preview.js';
 import { GUIDE_LIBRARY, guideAssetUrl, guideDurationLabel } from './guide-library.js';
 import {
+  classifyFilamentEffect,
+  deriveFilamentRenderMaterial,
+  normalizeRenderExportSize,
+  normalizeRenderSettings,
+} from './render-studio.js';
+import {
   LANGUAGE_CHANGE_EVENT,
   formatLocalizedNumber,
   getCurrentLocale,
@@ -70,7 +76,7 @@ import {
   localizeSubtree,
   translateUi,
   translateUiKey,
-} from './localization-runtime.js?v=20260831-release30';
+} from './localization-runtime.js?v=20260901-release34';
 
 const QA_FIXTURE_ALIASES = Object.freeze({
   'final-premium-medal': 'showcase-night',
@@ -201,6 +207,7 @@ const state = {
   galleryReturnFocus: null,
   settingsReturnFocus: null,
   dialogReturnFocus: null,
+  renderStudio: null,
   qaMode: Boolean(qaTemplate),
   qaOnboardingSteps: new Set(),
   liveEdit: null,
@@ -667,10 +674,11 @@ function ribbonStrip(start, end, width, z0, z1, color, opacity = .84) {
   return { name: 'Ribbon preview', color, opacity, triangles: prismTrianglesFromQuad(quad, z0, z1) };
 }
 
-function buildRibbonPreviewMeshes() {
-  if (!state.project || !state.ribbonPreviewVisible || state.project.medal.loopStyle === 'none') return [];
+function buildRibbonPreviewMeshes(options = {}) {
+  const visible = options.visible ?? state.ribbonPreviewVisible;
+  if (!state.project || !visible || state.project.medal.loopStyle === 'none') return [];
   const geometry = medalAttachmentGeometry(state.project);
-  const color = state.ribbonPreviewColor;
+  const color = options.color || state.ribbonPreviewColor;
   const bottom = medalBottomZ(), top = medalTopZ();
   const opening = geometry.aperture || geometry.apertures?.[0];
   const anchorY = geometry.apertures?.length
@@ -680,7 +688,8 @@ function buildRibbonPreviewMeshes() {
     ? Math.max(...geometry.apertures.map(item => item.x1)) - Math.min(...geometry.apertures.map(item => item.x0))
     : opening?.diameter || opening?.width || state.project.medal.slitWidth || 18;
   const width = Math.max(7, Math.min(38, openingWidth - 1));
-  const farY = geometry.top - Math.max(42, state.project.medal.height * .78);
+  const lengthScale = Math.max(.35, Math.min(1.4, Number(options.lengthScale) || 1));
+  const farY = geometry.top - Math.max(18, Math.max(42, state.project.medal.height * .78) * lengthScale);
   const thickness = .42;
   if (geometry.external) {
     return [
@@ -4843,6 +4852,11 @@ function openDialog(eyebrow,title,html, context = '') {
   if (!dialog.open) state.dialogReturnFocus = document.activeElement;
   dialog.dataset.context = context;
   $('#dialogEyebrow').textContent=eyebrow; $('#dialogTitle').textContent=title; $('#dialogBody').innerHTML=html;
+  // The shared modal is reused by setup, export, guides, and Render Studio.
+  // Reset retained scroll offsets so every newly opened workflow begins at its
+  // title instead of appearing clipped at the position of the previous one.
+  $('#dialogBody').scrollTop = 0;
+  dialog.scrollTop = 0;
   localizeSubtree(dialog);
   if(!dialog.open)dialog.showModal();
   requestAnimationFrame(() => dialog.querySelector('[autofocus], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])')?.focus());
@@ -4862,6 +4876,398 @@ function closeDialog(){
   delete dialog.dataset.context;
   if (state.dialogReturnFocus?.isConnected) state.dialogReturnFocus.focus();
   state.dialogReturnFocus = null;
+}
+
+function renderStudioText(key, variables = {}) {
+  return translateUiKey(`renderStudio.${key}`, variables);
+}
+
+function renderStudioLightDirection(settings) {
+  const azimuth = Number(settings.light.azimuth) * Math.PI / 180;
+  const elevation = Number(settings.light.elevation) * Math.PI / 180;
+  const horizontal = Math.cos(elevation);
+  return [horizontal * Math.cos(azimuth), horizontal * Math.sin(azimuth), Math.sin(elevation)];
+}
+
+function viewerMaterialFromFilament(filament, settings) {
+  const material = deriveFilamentRenderMaterial(filament, settings);
+  const albedo = settings.mode === 'glow'
+    ? (material.flags.glow ? .42 : .1)
+    : settings.mode === 'dark'
+      ? (material.flags.glow ? .82 : .58)
+      : 1;
+  return {
+    emissionColor: material.emissionColor,
+    emission: material.emissionStrength * .62,
+    specular: material.specular,
+    shininess: 12 + (1 - material.roughness) * 82,
+    sparkle: material.sparkle,
+    pattern: Math.max(material.woodGrain, material.carbonWeave, material.thermoShift),
+    surfaceEffect: material.woodGrain ? 2 : material.carbonWeave ? 3 : material.thermoShift ? 4 : 0,
+    albedo,
+  };
+}
+
+function applyViewerRenderAppearance(viewer, settings, palette) {
+  const normalized = normalizeRenderSettings(settings);
+  const light = normalized.light;
+  viewer.setRenderScene({
+    background: '#000000',
+    transparent: true,
+    lightDirection: renderStudioLightDirection(normalized),
+    ambient: light.ambient,
+    key: light.intensity * .62,
+    fill: light.intensity * (.12 + light.softness * .28),
+    rim: .04 + light.intensity * (.06 + light.softness * .08),
+    exposure: normalized.exposure,
+  });
+  viewer.setMaterials(palette.map((filament, slot) => [slot, viewerMaterialFromFilament(filament, normalized)]));
+  return normalized;
+}
+
+function renderBackgroundCss(background) {
+  if (background.transparent) return '';
+  return `radial-gradient(circle at 44% 31%, ${background.topColor} 0%, ${background.topColor} 18%, ${background.bottomColor} 100%)`;
+}
+
+function renderStudioPresetMarkup(id, title, description, disabled = false) {
+  return `<label class="render-preset-card ${disabled ? 'disabled' : ''}" data-preset="${id}"><input type="radio" name="renderPreset" value="${id}" ${id === 'studio' ? 'checked autofocus' : ''} ${disabled ? `disabled aria-describedby="renderGlowUnavailable"` : ''}><i aria-hidden="true"></i><strong>${escapeHtml(title)}</strong><small>${escapeHtml(description)}</small></label>`;
+}
+
+function renderStudioMarkup(palette, hasGlow) {
+  const materials = palette.map(filament => {
+    const effect = filament.effect || filament.material || renderStudioText('solid');
+    return `<div class="render-material-line"><i style="background:${escapeHtml(filament.color)}"></i><strong data-i18n-ignore>${escapeHtml(filament.name)}</strong><em data-i18n-ignore>${escapeHtml(effect)}</em></div>`;
+  }).join('');
+  const glowMessage = hasGlow ? renderStudioText('glowReady') : renderStudioText('glowUnavailable');
+  return `<div class="render-studio-intro"><p class="dialog-lede" id="renderStudioDescription">${escapeHtml(renderStudioText('intro'))}</p><span class="render-studio-local">${escapeHtml(renderStudioText('localOnly'))}</span></div>
+    <div class="render-studio" id="renderStudio">
+      <section class="render-studio-stage" aria-label="${escapeHtml(renderStudioText('previewRegion'))}">
+        <div class="render-preview-shell" id="renderStudioCanvasHost" data-background="studio-light" data-ground-shadow="true">
+          <div class="render-preview-topline"><span class="render-scene-badge"><b id="renderSceneName">${escapeHtml(renderStudioText('studio'))}</b><small id="renderSceneMode">${escapeHtml(renderStudioText('accurateColors'))}</small></span><span class="render-resolution-badge" id="renderResolutionBadge">2048 × 2048 PNG</span></div>
+          <div class="render-glow-note" id="renderGlowNote" hidden>${escapeHtml(renderStudioText('glowSimulation'))}</div>
+          <div class="render-camera-bar" role="group" aria-label="${escapeHtml(renderStudioText('cameraViews'))}">
+            <button type="button" class="active" data-render-camera="iso">${escapeHtml(renderStudioText('camera3d'))}</button>
+            <button type="button" data-render-camera="top">${escapeHtml(renderStudioText('cameraFront'))}</button>
+            <button type="button" data-render-camera="bottom">${escapeHtml(renderStudioText('cameraBack'))}</button>
+            <button type="button" data-render-camera="front">${escapeHtml(renderStudioText('cameraEdge'))}</button>
+            <button type="button" data-render-camera="right">${escapeHtml(renderStudioText('cameraSide'))}</button>
+          </div>
+        </div>
+        <div class="render-studio-helpbar"><span><strong>${escapeHtml(renderStudioText('dragToRotate'))}</strong> · ${escapeHtml(renderStudioText('zoomHelp'))}</span><button type="button" id="renderFit">${escapeHtml(renderStudioText('fitMedal'))}</button></div>
+      </section>
+      <aside class="render-studio-controls" aria-label="${escapeHtml(renderStudioText('controls'))}">
+        <div class="render-controls-scroll">
+          <fieldset class="render-control-group" id="renderPresetGroup"><legend>${escapeHtml(renderStudioText('chooseLook'))}<small>${escapeHtml(renderStudioText('chooseLookHelp'))}</small></legend>
+            <div class="render-preset-grid">
+              ${renderStudioPresetMarkup('daylight', renderStudioText('daylight'), renderStudioText('daylightHelp'))}
+              ${renderStudioPresetMarkup('studio', renderStudioText('studio'), renderStudioText('studioHelp'))}
+              ${renderStudioPresetMarkup('dark', renderStudioText('dark'), renderStudioText('darkHelp'))}
+              ${renderStudioPresetMarkup('glow', renderStudioText('glow'), renderStudioText('glowHelp'), !hasGlow)}
+            </div>
+            <p class="render-export-status" id="renderGlowUnavailable">${escapeHtml(glowMessage)}</p>
+            <div class="render-material-summary">${materials}</div>
+          </fieldset>
+          <fieldset class="render-control-group"><legend>${escapeHtml(renderStudioText('background'))}</legend><div class="render-background-grid">
+            ${[
+              ['warm-white', 'warm', renderStudioText('warm')], ['studio-light', 'neutral', renderStudioText('neutral')],
+              ['graphite', 'charcoal', renderStudioText('graphite')], ['midnight', 'midnight', renderStudioText('midnight')],
+              ['transparent', 'transparent', renderStudioText('transparent')],
+            ].map(([value, visual, label]) => `<label class="render-background-choice" data-background-choice="${visual}"><input type="radio" name="renderBackground" value="${value}" ${value === 'studio-light' ? 'checked' : ''}><i aria-hidden="true"></i><span>${escapeHtml(label)}</span></label>`).join('')}
+          </div><label class="render-slider"><span>${escapeHtml(renderStudioText('customBackground'))}</span><output id="renderBackgroundHex">#dfe5e1</output><input id="renderBackgroundColor" type="color" value="#dfe5e1"></label></fieldset>
+          <fieldset class="render-control-group"><legend>${escapeHtml(renderStudioText('sceneDetails'))}</legend>
+            <label class="render-toggle"><input id="renderRibbon" type="checkbox" ${state.project.medal.loopStyle === 'none' ? 'disabled' : 'checked'}><span>${escapeHtml(renderStudioText('showRibbon'))}<small>${escapeHtml(renderStudioText('ribbonHelp'))}</small></span></label>
+            <label class="render-slider"><span>${escapeHtml(renderStudioText('ribbonColor'))}</span><output id="renderRibbonHex">${escapeHtml(state.ribbonPreviewColor)}</output><input id="renderRibbonColor" type="color" value="${escapeHtml(state.ribbonPreviewColor)}" ${state.project.medal.loopStyle === 'none' ? 'disabled' : ''}></label>
+            <label class="render-toggle"><input id="renderGroundShadow" type="checkbox" checked><span>${escapeHtml(renderStudioText('groundShadow'))}<small>${escapeHtml(renderStudioText('groundShadowHelp'))}</small></span></label>
+          </fieldset>
+          <details class="render-fine-tune"><summary>${escapeHtml(renderStudioText('fineTune'))}</summary>
+            <label class="render-slider"><span>${escapeHtml(renderStudioText('brightness'))}</span><output id="renderBrightnessValue">100%</output><input id="renderBrightness" type="range" min="50" max="170" step="1" value="100"></label>
+            <label class="render-slider"><span>${escapeHtml(renderStudioText('lightDirection'))}</span><output id="renderLightAngleValue">−32°</output><input id="renderLightAngle" type="range" min="-180" max="180" step="1" value="-32"></label>
+            <label class="render-slider"><span>${escapeHtml(renderStudioText('glowStrength'))}</span><output id="renderGlowStrengthValue">100%</output><input id="renderGlowStrength" type="range" min="0" max="250" step="5" value="100" ${hasGlow ? '' : 'disabled'}></label>
+          </details>
+          <fieldset class="render-control-group"><legend>${escapeHtml(renderStudioText('imageSize'))}<small>${escapeHtml(renderStudioText('imageSizeHelp'))}</small></legend><div class="render-output-grid">
+            <label>${escapeHtml(renderStudioText('resolution'))}<select id="renderResolution"><option value="1024">1024 px · ${escapeHtml(renderStudioText('quick'))}</option><option value="2048" selected>2048 px · ${escapeHtml(renderStudioText('recommended'))}</option><option value="3072">3072 px · ${escapeHtml(renderStudioText('large'))}</option></select></label>
+            <label>${escapeHtml(renderStudioText('format'))}<select id="renderAspect"><option value="1:1">${escapeHtml(renderStudioText('square'))} · 1:1</option><option value="5:4">${escapeHtml(renderStudioText('landscape'))} · 5:4</option><option value="4:5">${escapeHtml(renderStudioText('portrait'))} · 4:5</option><option value="16:9">${escapeHtml(renderStudioText('wide'))} · 16:9</option></select></label>
+          </div></fieldset>
+          <div class="render-comparison" id="renderComparison" hidden></div>
+        </div>
+        <div class="render-actions"><button class="button primary" type="button" id="renderDownload">${escapeHtml(renderStudioText('downloadPng'))}</button><div class="render-actions-secondary"><button type="button" id="renderCompareDownload">${escapeHtml(renderStudioText('lightDarkImage'))}</button><button type="button" id="renderViewsDownload">${escapeHtml(renderStudioText('fourViewSheet'))}</button></div><output class="render-export-status" id="renderExportStatus" role="status">${escapeHtml(renderStudioText('ready'))}</output></div>
+      </aside>
+    </div>`;
+}
+
+function updateRenderStudioPresentation(session) {
+  if (!session || session.closed) return;
+  session.settings = applyViewerRenderAppearance(session.viewer, session.settings, session.palette);
+  const shell = $('#renderStudioCanvasHost');
+  const background = session.settings.background;
+  const visualBackground = {
+    'warm-white': 'warm', 'studio-light': 'neutral', graphite: 'charcoal', midnight: 'midnight', transparent: 'transparent',
+  }[background.id] || 'custom';
+  shell.dataset.background = visualBackground;
+  shell.dataset.groundShadow = String(session.groundShadow && !background.transparent);
+  shell.style.background = visualBackground === 'custom' ? renderBackgroundCss(background) : '';
+  shell.style.setProperty('--render-shadow-opacity', String(session.settings.shadowStrength));
+  const nameKey = { daylight: 'daylight', studio: 'studio', dark: 'dark', glow: 'glow' }[session.settings.presetId] || 'studio';
+  $('#renderSceneName').textContent = renderStudioText(nameKey);
+  $('#renderSceneMode').textContent = renderStudioText(session.settings.mode === 'glow' ? 'simulatedGlow' : session.settings.mode === 'dark' ? 'lowLight' : 'accurateColors');
+  $('#renderGlowNote').hidden = !session.hasGlow || !['dark', 'glow'].includes(session.settings.mode);
+  const size = normalizeRenderExportSize({ resolution: Number($('#renderResolution')?.value) || 2048, aspect: $('#renderAspect')?.value || '1:1' });
+  $('#renderResolutionBadge').textContent = `${size.width} × ${size.height} PNG`;
+  const backgroundKey = { 'warm-white': 'warm', 'studio-light': 'neutral', graphite: 'graphite', midnight: 'midnight', transparent: 'transparent' }[background.id];
+  const backgroundLabel = backgroundKey ? renderStudioText(backgroundKey) : background.topColor.toUpperCase();
+  $('#renderStudioDescription').textContent = renderStudioText('currentDescription', { look: renderStudioText(nameKey), background: backgroundLabel });
+  session.viewer.setDecorMeshes(buildRibbonPreviewMeshes({ visible: session.ribbonVisible, color: session.ribbonColor, lengthScale: .58 }));
+  session.viewer.render();
+}
+
+function fitRenderStudioCamera(session) {
+  session.viewer.fit();
+  // The editor uses deliberately generous CAD framing. Product renders should
+  // make the medal the subject while still retaining the optional ribbon.
+  session.viewer.distance = session.viewer.size * 1.08;
+  session.viewer.render();
+}
+
+function setRenderStudioCamera(session, preset) {
+  session.viewer.setPreset(preset);
+  if (preset === 'iso') {
+    session.viewer.azimuth = -.78;
+    session.viewer.elevation = .90;
+  }
+  fitRenderStudioCamera(session);
+}
+
+function syncRenderStudioControls(session) {
+  if (!session || session.closed) return;
+  $$('input[name="renderPreset"]').forEach(input => { input.checked = input.value === session.settings.presetId; });
+  $$('input[name="renderBackground"]').forEach(input => { input.checked = input.value === session.settings.background.id; });
+  $('#renderBrightness').value = String(Math.round(session.settings.exposure * 100));
+  $('#renderBrightnessValue').textContent = `${Math.round(session.settings.exposure * 100)}%`;
+  $('#renderLightAngle').value = String(session.settings.light.azimuth);
+  $('#renderLightAngleValue').textContent = `${session.settings.light.azimuth > 0 ? '+' : ''}${Math.round(session.settings.light.azimuth)}°`;
+  $('#renderGlowStrength').value = String(Math.round(session.settings.glowStrength * 100));
+  $('#renderGlowStrengthValue').textContent = `${Math.round(session.settings.glowStrength * 100)}%`;
+  updateRenderStudioPresentation(session);
+}
+
+function renderCanvasBlob(canvas) {
+  return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error(renderStudioText('imageFailed'))), 'image/png'));
+}
+
+async function imageFromBlob(blob) {
+  if (globalThis.createImageBitmap) return createImageBitmap(blob);
+  const url = URL.createObjectURL(blob);
+  try {
+    const image = new Image();
+    await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = () => reject(new Error(renderStudioText('imageFailed'))); image.src = url; });
+    return image;
+  } finally { URL.revokeObjectURL(url); }
+}
+
+async function composeRenderImage(modelBlob, settings, size, { groundShadow = true } = {}) {
+  const output = document.createElement('canvas');
+  output.width = size.width; output.height = size.height;
+  const context = output.getContext('2d');
+  if (!settings.background.transparent) {
+    const gradient = context.createLinearGradient(0, 0, 0, size.height);
+    gradient.addColorStop(0, settings.background.topColor);
+    gradient.addColorStop(1, settings.background.bottomColor);
+    context.fillStyle = gradient; context.fillRect(0, 0, size.width, size.height);
+    if (groundShadow) {
+      context.save();
+      context.filter = `blur(${Math.max(8, Math.round(size.width * .018))}px)`;
+      context.globalAlpha = settings.shadowStrength * .5;
+      context.fillStyle = '#07100c';
+      context.beginPath(); context.ellipse(size.width * .5, size.height * .76, size.width * .23, size.height * .035, 0, 0, Math.PI * 2); context.fill();
+      context.restore();
+    }
+  }
+  const image = await imageFromBlob(modelBlob);
+  if (settings.mode === 'glow' && settings.bloom > 0 && !settings.background.transparent) {
+    // A pair of local additive blurs approximates the halo that charged glow
+    // pigment creates in a dark room. Because non-glow slots are deliberately
+    // dimmed in this scene, the effect remains tied to emissive filament.
+    context.save();
+    context.globalCompositeOperation = 'lighter';
+    context.globalAlpha = Math.min(.62, settings.bloom * .34);
+    context.filter = `blur(${Math.max(7, Math.round(size.width * .009 * settings.bloom))}px)`;
+    context.drawImage(image, 0, 0, size.width, size.height);
+    context.globalAlpha *= .55;
+    context.filter = `blur(${Math.max(16, Math.round(size.width * .019 * settings.bloom))}px)`;
+    context.drawImage(image, 0, 0, size.width, size.height);
+    context.restore();
+  }
+  context.drawImage(image, 0, 0, size.width, size.height);
+  image.close?.();
+  return renderCanvasBlob(output);
+}
+
+async function captureRenderStudioImage(session, settings = session.settings, size = null) {
+  const normalized = applyViewerRenderAppearance(session.viewer, settings, session.palette);
+  const outputSize = size || normalizeRenderExportSize({ resolution: Number($('#renderResolution')?.value) || 2048, aspect: $('#renderAspect')?.value || '1:1' });
+  const modelBlob = await session.viewer.toPngBlob({ width: outputSize.width, height: outputSize.height });
+  return composeRenderImage(modelBlob, normalized, outputSize, { groundShadow: session.groundShadow });
+}
+
+async function composeImageGrid(entries, columns = 2, rows = 2, cellSize = 1024) {
+  const output = document.createElement('canvas');
+  output.width = columns * cellSize; output.height = rows * cellSize;
+  const context = output.getContext('2d');
+  context.fillStyle = '#f2f4f0'; context.fillRect(0, 0, output.width, output.height);
+  for (let index = 0; index < entries.length; index += 1) {
+    const x = index % columns * cellSize, y = Math.floor(index / columns) * cellSize;
+    const image = await imageFromBlob(entries[index].blob);
+    context.drawImage(image, x, y, cellSize, cellSize); image.close?.();
+    context.fillStyle = 'rgba(15,22,19,.78)'; context.fillRect(x + 18, y + cellSize - 66, Math.min(cellSize - 36, 260), 42);
+    context.fillStyle = '#ffffff'; context.font = '700 24px Arial'; context.textBaseline = 'middle'; context.fillText(entries[index].label, x + 34, y + cellSize - 45);
+  }
+  return renderCanvasBlob(output);
+}
+
+function setRenderExportBusy(session, busy, message, error = false) {
+  if (session.closed) return;
+  ['renderDownload', 'renderCompareDownload', 'renderViewsDownload'].forEach(id => { const button = $(`#${id}`); if (button) button.disabled = busy; });
+  const status = $('#renderExportStatus');
+  status.textContent = message; status.classList.toggle('error', error);
+}
+
+async function runRenderStudioExport(session, task) {
+  if (!session || session.busy) return;
+  session.busy = true;
+  setRenderExportBusy(session, true, renderStudioText('rendering'));
+  try {
+    await task();
+    if (!session.closed) setRenderExportBusy(session, false, renderStudioText('downloadReady'));
+  } catch (error) {
+    console.error(error);
+    if (!session.closed) setRenderExportBusy(session, false, renderStudioText('renderFailed', { message: error.message }), true);
+  } finally {
+    session.busy = false;
+    if (session.closed) {
+      session.viewer.restoreScene(session.editorScene);
+      updateRibbonPreview();
+      updateLayerPreview();
+    } else updateRenderStudioPresentation(session);
+  }
+}
+
+function bindRenderStudio(session) {
+  $$('input[name="renderPreset"]').forEach(input => input.addEventListener('change', event => {
+    session.settings = normalizeRenderSettings(event.target.value);
+    syncRenderStudioControls(session);
+  }));
+  $$('input[name="renderBackground"]').forEach(input => input.addEventListener('change', event => {
+    session.settings = normalizeRenderSettings({ ...session.settings, background: event.target.value });
+    updateRenderStudioPresentation(session);
+  }));
+  $('#renderBackgroundColor').addEventListener('input', event => {
+    $('#renderBackgroundHex').textContent = event.target.value.toUpperCase();
+    session.settings = normalizeRenderSettings({ ...session.settings, background: event.target.value });
+    updateRenderStudioPresentation(session);
+  });
+  $('#renderBrightness').addEventListener('input', event => {
+    session.settings = normalizeRenderSettings({ ...session.settings, exposure: Number(event.target.value) / 100 });
+    $('#renderBrightnessValue').textContent = `${event.target.value}%`; updateRenderStudioPresentation(session);
+  });
+  $('#renderLightAngle').addEventListener('input', event => {
+    session.settings = normalizeRenderSettings({ ...session.settings, lightAzimuth: Number(event.target.value) });
+    $('#renderLightAngleValue').textContent = `${Number(event.target.value) > 0 ? '+' : ''}${event.target.value}°`; updateRenderStudioPresentation(session);
+  });
+  $('#renderGlowStrength').addEventListener('input', event => {
+    session.settings = normalizeRenderSettings({ ...session.settings, glowStrength: Number(event.target.value) / 100 });
+    $('#renderGlowStrengthValue').textContent = `${event.target.value}%`; updateRenderStudioPresentation(session);
+  });
+  $('#renderGroundShadow').addEventListener('change', event => { session.groundShadow = event.target.checked; updateRenderStudioPresentation(session); });
+  $('#renderRibbon').addEventListener('change', event => { session.ribbonVisible = event.target.checked; updateRenderStudioPresentation(session); fitRenderStudioCamera(session); });
+  $('#renderRibbonColor').addEventListener('input', event => { session.ribbonColor = event.target.value; $('#renderRibbonHex').textContent = event.target.value.toUpperCase(); updateRenderStudioPresentation(session); });
+  $('#renderResolution').addEventListener('change', () => updateRenderStudioPresentation(session));
+  $('#renderAspect').addEventListener('change', () => { updateRenderStudioPresentation(session); requestAnimationFrame(() => session.viewer.resize()); });
+  $$('[data-render-camera]').forEach(button => button.addEventListener('click', () => {
+    setRenderStudioCamera(session, button.dataset.renderCamera);
+    $$('[data-render-camera]').forEach(item => item.classList.toggle('active', item === button));
+  }));
+  $('#renderFit').addEventListener('click', () => fitRenderStudioCamera(session));
+  $('#renderDownload').addEventListener('click', () => runRenderStudioExport(session, async () => {
+    const blob = await captureRenderStudioImage(session);
+    downloadBlob(blob, `${safeFilename(state.project.name)}-${session.settings.presetId}-render.png`);
+  }));
+  $('#renderCompareDownload').addEventListener('click', () => runRenderStudioExport(session, async () => {
+    const size = normalizeRenderExportSize({ resolution: 1024, aspect: '1:1' });
+    const daylight = normalizeRenderSettings('daylight');
+    const night = normalizeRenderSettings(session.hasGlow ? 'glow' : 'dark');
+    const entries = [
+      { label: renderStudioText('daylight'), blob: await captureRenderStudioImage(session, daylight, size) },
+      { label: renderStudioText(session.hasGlow ? 'glow' : 'dark'), blob: await captureRenderStudioImage(session, night, size) },
+    ];
+    const comparison = await composeImageGrid(entries, 2, 1, 1024);
+    session.comparisonUrls.forEach(url => URL.revokeObjectURL(url)); session.comparisonUrls = [];
+    const comparisonElement = $('#renderComparison');
+    comparisonElement.hidden = false;
+    comparisonElement.innerHTML = entries.map(entry => { const url = URL.createObjectURL(entry.blob); session.comparisonUrls.push(url); return `<figure><img src="${url}" alt="${escapeHtml(entry.label)}"><figcaption>${escapeHtml(entry.label)}</figcaption></figure>`; }).join('');
+    downloadBlob(comparison, `${safeFilename(state.project.name)}-light-dark.png`);
+  }));
+  $('#renderViewsDownload').addEventListener('click', () => runRenderStudioExport(session, async () => {
+    const camera = session.viewer.cameraState();
+    const size = normalizeRenderExportSize({ resolution: 1024, aspect: '1:1' });
+    const views = [['iso', renderStudioText('camera3d')], ['top', renderStudioText('cameraFront')], ['bottom', renderStudioText('cameraBack')], ['front', renderStudioText('cameraEdge')]];
+    const entries = [];
+    try {
+      for (const [preset, label] of views) {
+        setRenderStudioCamera(session, preset);
+        entries.push({ label, blob: await captureRenderStudioImage(session, session.settings, size) });
+      }
+    } finally { session.viewer.restoreCamera(camera); }
+    downloadBlob(await composeImageGrid(entries), `${safeFilename(state.project.name)}-four-views.png`);
+  }));
+}
+
+async function openRenderStudio() {
+  if (!state.project) return;
+  if (state.view !== '3d') setView('3d');
+  cancelPlacement();
+  setInspectionOpen(false, { mark: false });
+  const trigger = $('#savePreview');
+  trigger.disabled = true;
+  try {
+    await ensure3DModel();
+    if (!state.viewer || !state.viewerResult?.meshes?.length) throw new Error(renderStudioText('modelNotReady'));
+    const palette = getPalette(state.project, state.inventory);
+    const hasGlow = palette.some(filament => classifyFilamentEffect(filament).flags.glow);
+    openDialog('MedalForge', renderStudioText('title'), renderStudioMarkup(palette, hasGlow), 'render-studio');
+    dialog.classList.add('render-studio-dialog');
+    const originalParent = modelCanvas.parentNode;
+    const originalNextSibling = modelCanvas.nextSibling;
+    const editorScene = state.viewer.sceneState();
+    const session = {
+      viewer: state.viewer, palette, hasGlow, editorScene, originalParent, originalNextSibling,
+      settings: normalizeRenderSettings('studio'), groundShadow: true,
+      ribbonVisible: state.project.medal.loopStyle !== 'none', ribbonColor: state.ribbonPreviewColor,
+      comparisonUrls: [], busy: false, closed: false,
+    };
+    state.renderStudio = session;
+    $('#renderStudioCanvasHost').prepend(modelCanvas);
+    modelCanvas.hidden = false;
+    session.viewer.setGrid(false); session.viewer.setExplode(0); session.viewer.setClipZ(1e6);
+    session.viewer.setSectionMeshes([]); session.viewer.clearProxyMeshes(); session.viewer.clearHoverSurface();
+    bindRenderStudio(session);
+    syncRenderStudioControls(session);
+    setRenderStudioCamera(session, 'iso');
+    state.dialogCleanup = () => {
+      session.closed = true;
+      session.comparisonUrls.forEach(url => URL.revokeObjectURL(url));
+      if (session.originalNextSibling?.parentNode === session.originalParent) session.originalParent.insertBefore(modelCanvas, session.originalNextSibling);
+      else session.originalParent.append(modelCanvas);
+      modelCanvas.style.removeProperty('background');
+      session.viewer.restoreScene(session.editorScene);
+      updateRibbonPreview();
+      requestAnimationFrame(() => session.viewer.resize());
+      dialog.classList.remove('render-studio-dialog');
+      if (state.renderStudio === session) state.renderStudio = null;
+    };
+  } catch (error) {
+    toast(renderStudioText('renderFailed', { message: error.message }), { error: true });
+  } finally { trigger.disabled = false; }
 }
 
 function guideTranscriptMarkup(guide) {
@@ -7436,7 +7842,7 @@ function bindViewerControls() {
     updateRibbonPreview();
   });
   $('#showAllParts').addEventListener('click', () => { $$('[data-part-visible]').forEach(input => { input.checked = true; state.viewer?.setVisibility(Number(input.dataset.partVisible), true); }); });
-  $('#savePreview').addEventListener('click', async () => { if (!state.viewer) return; downloadBlob(await state.viewer.toPngBlob(), `${safeFilename(state.project.name)}-preview.png`); toast('3D preview PNG downloaded'); });
+  $('#savePreview').addEventListener('click', openRenderStudio);
 }
 
 function openGlobalSettings() {

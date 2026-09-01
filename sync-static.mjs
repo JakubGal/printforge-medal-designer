@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 
 const root = process.cwd();
 const destination = join(root, 'public');
-const releaseTag = '20260831-release30';
+const releaseTag = '20260901-release34';
 const rootFiles = [
   'index.html',
   '404.html',
@@ -41,6 +41,7 @@ const medalFiles = [
   'image-processing.js',
   'image-worker.js',
   'viewer3d.js',
+  'render-studio.js',
   'report-engine.js',
   'concept-engine.js',
   'medal-aesthetic.js',

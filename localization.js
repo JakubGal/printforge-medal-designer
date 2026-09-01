@@ -7954,6 +7954,126 @@ Object.assign(CS.tools, { items: 'Prvky' });
 Object.assign(DE.tools, { items: 'Elemente' });
 Object.assign(PL.tools, { items: 'Elementy' });
 Object.assign(DE.text, { bold: 'Fett' });
+Object.assign(EN.camera, { renderImages: 'Render images', renderImagesHelp: 'Open the medal image studio' });
+Object.assign(SK.camera, { renderImages: 'Vykresliť obrázky', renderImagesHelp: 'Otvoriť štúdio obrázkov medaily' });
+Object.assign(CS.camera, { renderImages: 'Vykreslit obrázky', renderImagesHelp: 'Otevřít studio obrázků medaile' });
+Object.assign(DE.camera, { renderImages: 'Bilder rendern', renderImagesHelp: 'Medaillen-Bildstudio öffnen' });
+Object.assign(PL.camera, { renderImages: 'Renderuj obrazy', renderImagesHelp: 'Otwórz studio obrazów medalu' });
+
+Object.assign(EN, {
+  renderStudio: {
+    title: 'Medal image studio', intro: 'Create polished product images from the medal you are editing. Rotate it, choose a scene, preview real filament effects, and download without changing the printable design.',
+    localOnly: 'Rendered on this device', previewRegion: 'Live medal image preview', controls: 'Image appearance controls',
+    chooseLook: 'Choose a look', chooseLookHelp: 'Start with one scene; every choice updates the medal immediately.',
+    daylight: 'Daylight', daylightHelp: 'Warm natural light for realistic colors.', studio: 'Soft studio', studioHelp: 'Balanced catalog lighting · recommended.',
+    dark: 'Dark room', darkHelp: 'Low light with crisp edge highlights.', glow: 'Glow preview', glowHelp: 'Shows only glow filaments emitting in darkness.',
+    accurateColors: 'Balanced filament colors', lowLight: 'Low-light product preview', simulatedGlow: 'Illustrative glow preview',
+    glowSimulation: 'Glow is simulated. Real brightness depends on charging time, pigment, and printed thickness.',
+    glowReady: 'Glow filament detected. Compare its light and dark appearance.', glowUnavailable: 'No glow or fluorescent filament is used in this medal yet.',
+    background: 'Background', warm: 'Warm', neutral: 'Neutral', graphite: 'Graphite', midnight: 'Midnight', transparent: 'Transparent', customBackground: 'Custom background color',
+    sceneDetails: 'Scene details', showRibbon: 'Show the attached ribbon', ribbonHelp: 'Presentation only · never added to production files.', ribbonColor: 'Ribbon color',
+    groundShadow: 'Soft ground shadow', groundShadowHelp: 'Helps the medal read as a physical product.', fineTune: 'Fine-tune the light',
+    brightness: 'Brightness', lightDirection: 'Light direction', glowStrength: 'Glow strength', imageSize: 'Image size', imageSizeHelp: 'Resolution affects the picture only, never the printable geometry.',
+    resolution: 'Resolution', format: 'Image shape', quick: 'Quick', recommended: 'Recommended', large: 'Large', square: 'Square', landscape: 'Landscape', portrait: 'Portrait', wide: 'Wide',
+    cameraViews: 'Medal camera views', camera3d: '3D', cameraFront: 'Front', cameraBack: 'Back', cameraEdge: 'Edge', cameraSide: 'Side', fitMedal: 'Fit medal',
+    dragToRotate: 'Drag the medal to rotate it', zoomHelp: 'wheel or pinch to zoom', downloadPng: 'Download PNG', lightDarkImage: 'Light + dark image', fourViewSheet: '4-view sheet',
+    ready: 'Ready · the printable medal is unchanged', rendering: 'Rendering the image on this device…', downloadReady: 'Image download ready.', imageFailed: 'The image could not be created.',
+    renderFailed: 'Render failed: {message}', modelNotReady: 'Finish building the 3D medal, then open the image studio again.',
+    currentDescription: '{look} scene · {background} background · drag to choose the exact camera angle.', solid: 'Solid',
+  },
+});
+
+Object.assign(SK, {
+  renderStudio: {
+    title: 'Štúdio obrázkov medaily', intro: 'Vytvorte profesionálne produktové obrázky z upravovanej medaily. Otáčajte ju, vyberte scénu, prezrite reálne efekty filamentov a stiahnite obrázok bez zmeny tlačiteľného návrhu.',
+    localOnly: 'Vykreslené v tomto zariadení', previewRegion: 'Živý náhľad obrázka medaily', controls: 'Ovládanie vzhľadu obrázka',
+    chooseLook: 'Vyberte vzhľad', chooseLookHelp: 'Začnite jednou scénou; každá voľba medailu ihneď aktualizuje.',
+    daylight: 'Denné svetlo', daylightHelp: 'Teplé prirodzené svetlo pre realistické farby.', studio: 'Jemné štúdio', studioHelp: 'Vyvážené katalógové osvetlenie · odporúčané.',
+    dark: 'Tmavá miestnosť', darkHelp: 'Slabé svetlo s čistým osvetlením hrán.', glow: 'Náhľad svietenia', glowHelp: 'V tme svietia iba fosforeskujúce filamenty.',
+    accurateColors: 'Vyvážené farby filamentov', lowLight: 'Produktový náhľad pri slabom svetle', simulatedGlow: 'Ilustračný náhľad svietenia',
+    glowSimulation: 'Svietenie je simulované. Skutočný jas závisí od času nasvietenia, pigmentu a hrúbky tlače.',
+    glowReady: 'Bol zistený svietiaci filament. Porovnajte jeho vzhľad na svetle a v tme.', glowUnavailable: 'Táto medaila zatiaľ nepoužíva svietiaci ani fluorescenčný filament.',
+    background: 'Pozadie', warm: 'Teplé', neutral: 'Neutrálne', graphite: 'Grafitové', midnight: 'Polnočné', transparent: 'Priehľadné', customBackground: 'Vlastná farba pozadia',
+    sceneDetails: 'Detaily scény', showRibbon: 'Zobraziť pripevnenú stuhu', ribbonHelp: 'Iba prezentácia · nikdy sa nepridá do výrobných súborov.', ribbonColor: 'Farba stuhy',
+    groundShadow: 'Jemný tieň pod medailou', groundShadowHelp: 'Pomáha zobraziť medailu ako fyzický výrobok.', fineTune: 'Doladiť svetlo',
+    brightness: 'Jas', lightDirection: 'Smer svetla', glowStrength: 'Sila svietenia', imageSize: 'Veľkosť obrázka', imageSizeHelp: 'Rozlíšenie ovplyvňuje iba obrázok, nie tlačiteľnú geometriu.',
+    resolution: 'Rozlíšenie', format: 'Tvar obrázka', quick: 'Rýchle', recommended: 'Odporúčané', large: 'Veľké', square: 'Štvorec', landscape: 'Na šírku', portrait: 'Na výšku', wide: 'Široké',
+    cameraViews: 'Pohľady kamery na medailu', camera3d: '3D', cameraFront: 'Spredu', cameraBack: 'Zozadu', cameraEdge: 'Hrana', cameraSide: 'Bok', fitMedal: 'Prispôsobiť medailu',
+    dragToRotate: 'Potiahnutím medailu otočíte', zoomHelp: 'kolieskom alebo gestom priblížite', downloadPng: 'Stiahnuť PNG', lightDarkImage: 'Obrázok svetlo + tma', fourViewSheet: 'Hárok so 4 pohľadmi',
+    ready: 'Pripravené · tlačiteľná medaila sa nemení', rendering: 'Obrázok sa vykresľuje v tomto zariadení…', downloadReady: 'Obrázok je pripravený na stiahnutie.', imageFailed: 'Obrázok sa nepodarilo vytvoriť.',
+    renderFailed: 'Vykreslenie zlyhalo: {message}', modelNotReady: 'Dokončite vytváranie 3D medaily a potom znovu otvorte štúdio obrázkov.',
+    currentDescription: 'Scéna {look} · pozadie {background} · potiahnutím vyberte presný uhol kamery.', solid: 'Jednofarebný',
+  },
+});
+
+Object.assign(CS, {
+  renderStudio: {
+    title: 'Studio obrázků medaile', intro: 'Vytvořte profesionální produktové obrázky z upravované medaile. Otáčejte ji, vyberte scénu, prohlédněte skutečné efekty filamentů a stáhněte obrázek bez změny tisknutelného návrhu.',
+    localOnly: 'Vykresleno v tomto zařízení', previewRegion: 'Živý náhled obrázku medaile', controls: 'Ovládání vzhledu obrázku',
+    chooseLook: 'Vyberte vzhled', chooseLookHelp: 'Začněte jednou scénou; každá volba medaili ihned aktualizuje.',
+    daylight: 'Denní světlo', daylightHelp: 'Teplé přirozené světlo pro realistické barvy.', studio: 'Jemné studio', studioHelp: 'Vyvážené katalogové osvětlení · doporučeno.',
+    dark: 'Tmavá místnost', darkHelp: 'Slabé světlo s čistým osvětlením hran.', glow: 'Náhled svícení', glowHelp: 'Ve tmě svítí pouze fosforeskující filamenty.',
+    accurateColors: 'Vyvážené barvy filamentů', lowLight: 'Produktový náhled při slabém světle', simulatedGlow: 'Ilustrační náhled svícení',
+    glowSimulation: 'Svícení je simulované. Skutečný jas závisí na době nasvícení, pigmentu a tloušťce tisku.',
+    glowReady: 'Byl zjištěn svítící filament. Porovnejte jeho vzhled na světle a ve tmě.', glowUnavailable: 'Tato medaile zatím nepoužívá svítící ani fluorescenční filament.',
+    background: 'Pozadí', warm: 'Teplé', neutral: 'Neutrální', graphite: 'Grafitové', midnight: 'Půlnoční', transparent: 'Průhledné', customBackground: 'Vlastní barva pozadí',
+    sceneDetails: 'Detaily scény', showRibbon: 'Zobrazit připevněnou stuhu', ribbonHelp: 'Pouze prezentace · nikdy se nepřidá do výrobních souborů.', ribbonColor: 'Barva stuhy',
+    groundShadow: 'Jemný stín pod medailí', groundShadowHelp: 'Pomáhá zobrazit medaili jako fyzický výrobek.', fineTune: 'Doladit světlo',
+    brightness: 'Jas', lightDirection: 'Směr světla', glowStrength: 'Síla svícení', imageSize: 'Velikost obrázku', imageSizeHelp: 'Rozlišení ovlivňuje pouze obrázek, ne tisknutelnou geometrii.',
+    resolution: 'Rozlišení', format: 'Tvar obrázku', quick: 'Rychlé', recommended: 'Doporučeno', large: 'Velké', square: 'Čtverec', landscape: 'Na šířku', portrait: 'Na výšku', wide: 'Široké',
+    cameraViews: 'Pohledy kamery na medaili', camera3d: '3D', cameraFront: 'Zepředu', cameraBack: 'Zezadu', cameraEdge: 'Hrana', cameraSide: 'Bok', fitMedal: 'Přizpůsobit medaili',
+    dragToRotate: 'Přetažením medaili otočíte', zoomHelp: 'kolečkem nebo gestem přiblížíte', downloadPng: 'Stáhnout PNG', lightDarkImage: 'Obrázek světlo + tma', fourViewSheet: 'List se 4 pohledy',
+    ready: 'Připraveno · tisknutelná medaile se nemění', rendering: 'Obrázek se vykresluje v tomto zařízení…', downloadReady: 'Obrázek je připraven ke stažení.', imageFailed: 'Obrázek se nepodařilo vytvořit.',
+    renderFailed: 'Vykreslení selhalo: {message}', modelNotReady: 'Dokončete vytváření 3D medaile a potom znovu otevřete studio obrázků.',
+    currentDescription: 'Scéna {look} · pozadí {background} · přetažením vyberte přesný úhel kamery.', solid: 'Jednobarevný',
+  },
+});
+
+Object.assign(DE, {
+  renderStudio: {
+    title: 'Medaillen-Bildstudio', intro: 'Erstellen Sie professionelle Produktbilder aus der Medaille, die Sie gerade bearbeiten. Drehen Sie sie, wählen Sie eine Szene, prüfen Sie echte Filamenteffekte und laden Sie das Bild herunter, ohne den druckbaren Entwurf zu verändern.',
+    localOnly: 'Auf diesem Gerät gerendert', previewRegion: 'Live-Vorschau des Medaillenbilds', controls: 'Steuerung des Bildaussehens',
+    chooseLook: 'Aussehen wählen', chooseLookHelp: 'Beginnen Sie mit einer Szene; jede Auswahl aktualisiert die Medaille sofort.',
+    daylight: 'Tageslicht', daylightHelp: 'Warmes natürliches Licht für realistische Farben.', studio: 'Weiches Studio', studioHelp: 'Ausgewogene Katalogbeleuchtung · empfohlen.',
+    dark: 'Dunkler Raum', darkHelp: 'Wenig Licht mit klaren Kantenlichtern.', glow: 'Leuchtvorschau', glowHelp: 'Im Dunkeln leuchten nur nachleuchtende Filamente.',
+    accurateColors: 'Ausgewogene Filamentfarben', lowLight: 'Produktvorschau bei wenig Licht', simulatedGlow: 'Illustrative Leuchtvorschau',
+    glowSimulation: 'Das Leuchten wird simuliert. Die echte Helligkeit hängt von Ladezeit, Pigment und Druckstärke ab.',
+    glowReady: 'Leuchtfilament erkannt. Vergleichen Sie das Aussehen bei Licht und im Dunkeln.', glowUnavailable: 'Diese Medaille verwendet noch kein leuchtendes oder fluoreszierendes Filament.',
+    background: 'Hintergrund', warm: 'Warm', neutral: 'Neutral', graphite: 'Graphit', midnight: 'Mitternacht', transparent: 'Transparent', customBackground: 'Eigene Hintergrundfarbe',
+    sceneDetails: 'Szenendetails', showRibbon: 'Befestigtes Band anzeigen', ribbonHelp: 'Nur zur Präsentation · wird nie in Produktionsdateien aufgenommen.', ribbonColor: 'Bandfarbe',
+    groundShadow: 'Weicher Bodenschatten', groundShadowHelp: 'Lässt die Medaille wie ein physisches Produkt wirken.', fineTune: 'Licht fein einstellen',
+    brightness: 'Helligkeit', lightDirection: 'Lichtrichtung', glowStrength: 'Leuchtstärke', imageSize: 'Bildgröße', imageSizeHelp: 'Die Auflösung beeinflusst nur das Bild, nie die druckbare Geometrie.',
+    resolution: 'Auflösung', format: 'Bildformat', quick: 'Schnell', recommended: 'Empfohlen', large: 'Groß', square: 'Quadrat', landscape: 'Querformat', portrait: 'Hochformat', wide: 'Breitbild',
+    cameraViews: 'Kameraansichten der Medaille', camera3d: '3D', cameraFront: 'Vorne', cameraBack: 'Hinten', cameraEdge: 'Kante', cameraSide: 'Seite', fitMedal: 'Medaille einpassen',
+    dragToRotate: 'Ziehen Sie die Medaille zum Drehen', zoomHelp: 'mit Rad oder Geste zoomen', downloadPng: 'PNG herunterladen', lightDarkImage: 'Bild Licht + Dunkel', fourViewSheet: 'Blatt mit 4 Ansichten',
+    ready: 'Bereit · die druckbare Medaille bleibt unverändert', rendering: 'Das Bild wird auf diesem Gerät gerendert…', downloadReady: 'Das Bild ist zum Herunterladen bereit.', imageFailed: 'Das Bild konnte nicht erstellt werden.',
+    renderFailed: 'Rendern fehlgeschlagen: {message}', modelNotReady: 'Erstellen Sie zuerst die 3D-Medaille fertig und öffnen Sie dann das Bildstudio erneut.',
+    currentDescription: 'Szene {look} · Hintergrund {background} · durch Ziehen den genauen Kamerawinkel wählen.', solid: 'Einfarbig',
+  },
+});
+
+Object.assign(PL, {
+  renderStudio: {
+    title: 'Studio obrazów medalu', intro: 'Twórz profesjonalne zdjęcia produktu z edytowanego medalu. Obracaj go, wybierz scenę, zobacz rzeczywiste efekty filamentów i pobierz obraz bez zmieniania modelu do druku.',
+    localOnly: 'Renderowane na tym urządzeniu', previewRegion: 'Podgląd obrazu medalu na żywo', controls: 'Sterowanie wyglądem obrazu',
+    chooseLook: 'Wybierz wygląd', chooseLookHelp: 'Zacznij od jednej sceny; każdy wybór natychmiast aktualizuje medal.',
+    daylight: 'Światło dzienne', daylightHelp: 'Ciepłe naturalne światło i realistyczne kolory.', studio: 'Miękkie studio', studioHelp: 'Zrównoważone oświetlenie katalogowe · zalecane.',
+    dark: 'Ciemne pomieszczenie', darkHelp: 'Słabe światło z wyraźnym podświetleniem krawędzi.', glow: 'Podgląd świecenia', glowHelp: 'W ciemności świecą tylko odpowiednie filamenty.',
+    accurateColors: 'Zrównoważone kolory filamentów', lowLight: 'Podgląd produktu przy słabym świetle', simulatedGlow: 'Ilustracyjny podgląd świecenia',
+    glowSimulation: 'Świecenie jest symulowane. Rzeczywista jasność zależy od czasu naświetlania, pigmentu i grubości wydruku.',
+    glowReady: 'Wykryto świecący filament. Porównaj wygląd w świetle i w ciemności.', glowUnavailable: 'Ten medal nie używa jeszcze świecącego ani fluorescencyjnego filamentu.',
+    background: 'Tło', warm: 'Ciepłe', neutral: 'Neutralne', graphite: 'Grafitowe', midnight: 'Nocne', transparent: 'Przezroczyste', customBackground: 'Własny kolor tła',
+    sceneDetails: 'Szczegóły sceny', showRibbon: 'Pokaż zamocowaną wstążkę', ribbonHelp: 'Tylko prezentacja · nigdy nie trafia do plików produkcyjnych.', ribbonColor: 'Kolor wstążki',
+    groundShadow: 'Miękki cień pod medalem', groundShadowHelp: 'Pomaga pokazać medal jako fizyczny produkt.', fineTune: 'Dostosuj światło',
+    brightness: 'Jasność', lightDirection: 'Kierunek światła', glowStrength: 'Siła świecenia', imageSize: 'Rozmiar obrazu', imageSizeHelp: 'Rozdzielczość wpływa tylko na obraz, nigdy na geometrię do druku.',
+    resolution: 'Rozdzielczość', format: 'Kształt obrazu', quick: 'Szybki', recommended: 'Zalecany', large: 'Duży', square: 'Kwadrat', landscape: 'Poziomy', portrait: 'Pionowy', wide: 'Szeroki',
+    cameraViews: 'Widoki kamery medalu', camera3d: '3D', cameraFront: 'Przód', cameraBack: 'Tył', cameraEdge: 'Krawędź', cameraSide: 'Bok', fitMedal: 'Dopasuj medal',
+    dragToRotate: 'Przeciągnij medal, aby go obrócić', zoomHelp: 'użyj kółka lub gestu, aby przybliżyć', downloadPng: 'Pobierz PNG', lightDarkImage: 'Obraz światło + ciemność', fourViewSheet: 'Plansza z 4 widokami',
+    ready: 'Gotowe · medal do druku pozostaje bez zmian', rendering: 'Obraz jest renderowany na tym urządzeniu…', downloadReady: 'Obraz jest gotowy do pobrania.', imageFailed: 'Nie udało się utworzyć obrazu.',
+    renderFailed: 'Renderowanie nie powiodło się: {message}', modelNotReady: 'Poczekaj na utworzenie medalu 3D, a następnie ponownie otwórz studio obrazów.',
+    currentDescription: 'Scena {look} · tło {background} · przeciągnij, aby wybrać dokładny kąt kamery.', solid: 'Jednolity',
+  },
+});
 
 function deepFreeze(value) {
   if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
