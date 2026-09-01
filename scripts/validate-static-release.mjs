@@ -43,7 +43,7 @@ async function assertModuleGraph(moduleFile) {
     assertInsideOutput(target, `${reference} from ${normalized} must not escape public/`);
     assert.equal(await exists(target), true, `${reference} from ${normalized} must exist`);
     if (target.endsWith('.js')) {
-      assert.match(reference, /\?v=20260901-release34$/u, `${reference} from ${normalized} must carry the current release cache key`);
+      assert.match(reference, /\?v=20260901-release35$/u, `${reference} from ${normalized} must carry the current release cache key`);
       await assertModuleGraph(target);
     }
   }

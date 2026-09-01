@@ -3,7 +3,7 @@ import {
   getCurrentLocale,
   initializeLocalization,
   setCurrentLocale,
-} from './localization-runtime.js?v=20260901-release34';
+} from './localization-runtime.js?v=20260901-release35';
 
 const COPY = Object.freeze({
   en: Object.freeze({

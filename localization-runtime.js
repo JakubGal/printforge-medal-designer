@@ -1,4 +1,4 @@
-import { SUPPORTED_LOCALES, TRANSLATIONS, translateMessage } from './localization.js?v=20260901-release34';
+import { SUPPORTED_LOCALES, TRANSLATIONS, translateMessage } from './localization.js?v=20260901-release35';
 
 const STORAGE_KEY = 'printforge-language-v1';
 export const LANGUAGE_CHANGE_EVENT = 'printforge:languagechange';

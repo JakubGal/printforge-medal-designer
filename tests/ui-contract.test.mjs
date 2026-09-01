@@ -88,9 +88,9 @@ test('plain-language operations replace the old visible CAD labels', async () =>
 
 test('cache-busted release assets and static hosting validation stay aligned', async () => {
   const [hub, studio] = await Promise.all([read('index.html'), read('workspaces/medals/index.html')]);
-  assert.match(hub, /release34/);
-  assert.match(studio, /styles\.css\?v=20260901-release34/);
-  assert.match(studio, /app\.js\?v=20260901-release34/);
+  assert.match(hub, /release35/);
+  assert.match(studio, /styles\.css\?v=20260901-release35/);
+  assert.match(studio, /app\.js\?v=20260901-release35/);
 });
 
 test('Render Studio reuses the live medal safely and exposes complete image workflows', async () => {
@@ -145,7 +145,7 @@ test('project safety and export cancellation keep their asynchronous guarantees'
   assert.match(app, /productionKinds\.has\(button\.dataset\.export\) && blocked/);
   assert.match(sync, /'shape-library\.js'/);
   assert.match(sync, /'guide-library\.js'/);
-  assert.match(sync, /20260901-release34/);
+  assert.match(sync, /20260901-release35/);
 });
 
 test('quick video guides use one accessible captioned player and keep the interactive guide available', async () => {

@@ -76,7 +76,7 @@ import {
   localizeSubtree,
   translateUi,
   translateUiKey,
-} from './localization-runtime.js?v=20260901-release34';
+} from './localization-runtime.js?v=20260901-release35';
 
 const QA_FIXTURE_ALIASES = Object.freeze({
   'final-premium-medal': 'showcase-night',
@@ -4931,7 +4931,7 @@ function renderBackgroundCss(background) {
 }
 
 function renderStudioPresetMarkup(id, title, description, disabled = false) {
-  return `<label class="render-preset-card ${disabled ? 'disabled' : ''}" data-preset="${id}"><input type="radio" name="renderPreset" value="${id}" ${id === 'studio' ? 'checked autofocus' : ''} ${disabled ? `disabled aria-describedby="renderGlowUnavailable"` : ''}><i aria-hidden="true"></i><strong>${escapeHtml(title)}</strong><small>${escapeHtml(description)}</small></label>`;
+  return `<label class="render-preset-card ${disabled ? 'disabled' : ''}" data-preset="${id}"><input type="radio" name="renderPreset" value="${id}" ${id === 'studio' ? 'checked' : ''} ${disabled ? `disabled aria-describedby="renderGlowUnavailable"` : ''}><i aria-hidden="true"></i><strong>${escapeHtml(title)}</strong><small>${escapeHtml(description)}</small></label>`;
 }
 
 function renderStudioMarkup(palette, hasGlow) {
