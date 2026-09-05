@@ -25,6 +25,25 @@ try {
   assert.match(studio.headers.get('content-security-policy') || '', /wasm-unsafe-eval/u);
   assert.doesNotMatch(studio.headers.get('content-security-policy') || '', /(?:^|\s)'unsafe-eval'(?:;|\s|$)/u);
 
+  const voronoi = await request('/workspaces/voronoi/');
+  assert.equal(voronoi.status, 200);
+  assert.match(await voronoi.text(), /Voronoi/u);
+  assert.match(voronoi.headers.get('content-security-policy') || '', /worker-src\s+'self'/u);
+  const voronoiCanonical = await request('/workspaces/voronoi?source=hub');
+  assert.equal(voronoiCanonical.status, 308);
+  assert.equal(voronoiCanonical.headers.get('location'), '/workspaces/voronoi/?source=hub');
+  for (const asset of ['lattice-app.js', 'lattice-engine.js', 'lattice-worker.js', 'lattice-viewer.js', 'lattice-settings.js', 'lattice-solid.js', 'lattice-rods.js', 'lattice-surface.js', 'lattice-manifold.js', 'lattice-validate.js', 'manifold/manifold.js', 'lattice.css']) {
+    const response = await request(`/assets/voronoi/${asset}?v=20260901-release37`, { method: 'HEAD' });
+    assert.equal(response.status, 200, `${asset} must be served`);
+    assert.match(response.headers.get('content-type') || '', asset.endsWith('.js') ? /^text\/javascript/u : /^text\/css/u);
+  }
+  const rodKernel = await request('/assets/voronoi/manifold/manifold.wasm', { method: 'HEAD' });
+  assert.equal(rodKernel.status, 200);
+  assert.equal(rodKernel.headers.get('content-type'), 'application/wasm');
+  const rodWorker = await request('/assets/voronoi/lattice-worker.js', { method: 'HEAD' });
+  assert.match(rodWorker.headers.get('content-security-policy') || '', /(?:^|\s)'unsafe-eval'(?:;|\s|$)/u);
+  assert.doesNotMatch(voronoi.headers.get('content-security-policy') || '', /(?:^|\s)'unsafe-eval'(?:;|\s|$)/u);
+
   const canonical = await request('/workspaces/medals?qa=workflow&runtime=static');
   assert.equal(canonical.status, 308);
   assert.equal(canonical.headers.get('location'), '/workspaces/medals/?qa=workflow&runtime=static');

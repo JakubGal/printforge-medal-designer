@@ -1,8 +1,8 @@
 # PrintForge
 
 PrintForge is a local-first platform for focused, parametric 3D-product studios.
-The root page is a workspace gallery; MedalForge is the first production-ready
-studio. Future studios can reuse the same browser geometry, materials, image
+The root page is a workspace gallery with Medal Studio and Voronoi lattice.
+Future studios can reuse the same browser geometry, materials, image
 cleanup, pricing, validation, storage, and export foundation while exposing only
 the controls that matter for their product.
 
@@ -74,6 +74,63 @@ download or ship an AI model. Use
 `pnpm run sync:static` when only those assets need refreshing.
 
 ## Included in this MVP
+
+### Voronoi lattice studio
+
+The studio includes editable project save/open with the source mesh, a JSON
+geometry report, unit conversion, uniform model resizing, and density/thickness
+controls with both sliders and precise millimeter inputs.
+
+Use **Measure & set scale** to click two points on the original STL, enter their
+desired straight-line distance in millimeters, and uniformly resize the whole
+model about its center. Picking uses actual source triangles and supports
+orbiting between points. The optional **Scale lattice settings with the model**
+control preserves cell, wall, skin, cap, and custom sampling proportions. Imported
+STLs inherit proportional lattice settings; saved projects retain their own
+settings. Very small or large imports show a unit/scale notice because STL files
+do not declare physical units.
+
+Surface and internal 3D strut modes construct explicit rods with circular,
+rectangular or regular polygon cross-sections. Rectangle aspect ratio, polygon
+side count and profile rotation remain editable. Continuous swept profiles
+follow curved surface paths, and compact joints are fused using the local
+[Manifold Boolean kernel](https://manifoldcad.org/docs/jsapi/documents/Using_Manifold.html).
+These modes do not use a voxel lattice surface. Quality changes circular profile
+tessellation and curved path accuracy. The kernel and its license ship with the
+static site, so uploaded meshes remain on the device.
+
+Surface rods follow Voronoi boundaries on the actual STL surface and retain
+their full cross-section, including the half outside the original surface.
+**Surface inset** moves the centerlines inward. Internal rods follow actual
+Voronoi cell edges and are trimmed to the original solid. Cellular walls, 2D
+extrusions and optional solid shells still use sampling; automatic resolution
+accounts for source dimensions, cell size and the thinnest requested features.
+
+Open **Voronoi lattice** in the gallery, or visit
+[http://127.0.0.1:4173/workspaces/voronoi/](http://127.0.0.1:4173/workspaces/voronoi/).
+Import an ASCII or binary STL, or start from a built-in example, to generate a
+cellular structure clipped to the model. All mesh processing runs locally in
+the browser, with generation in a cancellable worker.
+
+- True internal **3D ribs** follow Voronoi cell junctions throughout the volume;
+  **3D cellular walls** follow the faces separating neighboring cells.
+- **2D extruded** patterns extend through the model, while **surface rods**
+  form connected curves along its exterior.
+- Adjust cell size, strut or wall thickness, outer shell, random seed, and
+  sampling quality; regenerate reproducible variations without re-uploading.
+- Orbit, zoom, inspect the original source, and use a live cutaway to see
+  internal cells. Export the generated geometry as binary STL.
+
+STL contains no unit metadata; dimensions are interpreted in millimeters.
+Cellular walls and optional shells sample an implicit material field, so quality
+and model size set the smallest detail they can reproduce. Thin sampled features
+may disappear; higher quality costs time and memory. Rod profiles remain
+polygonal STL approximations, and very thick rods can merge adjacent cells.
+Use the displayed resolution and mesh diagnostics to choose suitable settings
+and inspect the exported STL in a slicer. These checks describe the mesh;
+they do not certify structural strength or replace mechanical simulation.
+
+### Medal Studio
 
 - Circle, oval, rounded, hexagon, shield, or hand-drawn/custom medal bodies with single, double, or no ribbon slot.
 - A guided clean start, one-click reset, and editable example gallery including the supplied photo-inspired medals with independent front and back object sets.

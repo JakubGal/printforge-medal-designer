@@ -62,7 +62,7 @@ main { overflow: hidden; }
 .section-heading { display: flex; max-width: 1300px; margin: 0 auto 42px; align-items: end; justify-content: space-between; gap: 50px; }
 .section-heading h2, .workflow h2 { max-width: 760px; margin: 12px 0 0; font-size: clamp(32px, 3.7vw, 52px); line-height: 1.03; letter-spacing: -.052em; }
 .section-heading > p { max-width: 410px; margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
-.workspace-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; max-width: 1300px; margin: 0 auto; }
+.workspace-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; max-width: 1300px; margin: 0 auto; }
 .workspace-card { overflow: hidden; border: 1px solid rgba(34,46,40,.11); border-radius: 22px; background: var(--panel); box-shadow: 0 10px 30px rgba(35,48,41,.055); }
 .workspace-card.ready { border-color: rgba(47,98,243,.3); box-shadow: 0 18px 45px rgba(47,98,243,.11); }
 .workspace-visual { position: relative; height: 174px; overflow: hidden; background: #dce3dc; }
@@ -80,6 +80,14 @@ main { overflow: hidden; }
 .workspace-visual.custom span { left: 20%; top: 35px; width: 74px; height: 100px; border-radius: 17px; transform: rotate(-8deg); }
 .workspace-visual.custom i { left: 44%; top: 27px; width: 90px; height: 112px; border-radius: 50%; }
 .workspace-visual.custom b { right: 18%; top: 49px; width: 67px; height: 75px; border-radius: 8px; transform: rotate(9deg); }
+.workspace-visual.voronoi { background: radial-gradient(ellipse at 50% 35%, #25443c, #112a27 75%); }
+.workspace-visual.voronoi::before { position: absolute; inset: 0; content: ''; opacity: .23; background-image: linear-gradient(#78958a 1px, transparent 1px), linear-gradient(90deg, #78958a 1px, transparent 1px); background-size: 28px 28px; transform: perspective(250px) rotateX(55deg) scale(1.5); transform-origin: center bottom; }
+.workspace-visual.voronoi svg { position: relative; z-index: 1; display: block; width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 10px 9px rgba(0,0,0,.32)); transition: transform .35s ease; }
+.workspace-card[data-workspace='voronoi']:hover svg { transform: translateY(-3px) rotate(-1deg); }
+.workspace-visual.voronoi path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.lattice-depth { stroke: #508f79; stroke-width: 3.5; opacity: .8; }
+.lattice-connectors { stroke: #8bc793; stroke-width: 3; opacity: .85; }
+.lattice-front { stroke: #d5f3a9; stroke-width: 4.8; }
 .workspace-card-body { padding: 22px; }
 .workspace-meta { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
 .workspace-meta em { padding: 5px 8px; border-radius: 999px; color: #4f5e57; background: #ebeee9; font-style: normal; }
@@ -110,7 +118,6 @@ footer strong { color: var(--ink); } footer a { color: var(--accent); font-weigh
   .hero-preview { min-height: 440px; max-width: 720px; }
   .hero-preview img { min-height: 440px; }
   .workspace-grid { grid-template-columns: 1fr 1fr; }
-  .workspace-card:last-child { grid-column: 1 / -1; }
   .workflow ol { grid-template-columns: 1fr 1fr; }
 }
 

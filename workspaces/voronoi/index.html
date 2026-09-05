@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#eef2f4" />
+    <meta name="description" content="Turn an STL into a Voronoi lattice. Create connected surface and 3D rods with round, rectangular, or polygon cross-sections, plus cellular walls and extruded patterns locally in your browser." />
+    <title>Voronoi lattice · PrintForge</title>
+    <link rel="stylesheet" href="../../assets/voronoi/lattice.css?v=20260905-release45" />
+  </head>
+  <body>
+    <header class="studio-header">
+      <a class="brand" href="../../" aria-label="Return to PrintForge studios"><span class="brand-mark">P</span><strong>PrintForge</strong></a>
+      <span class="header-divider"></span>
+      <div class="studio-title"><h1>Voronoi lattice</h1><span>Volume & surface studio</span></div>
+      <span class="local-badge"><i></i> Runs on your device</span>
+      <div class="header-actions"><button id="loadProject" class="quiet">Open project</button><button id="saveProject" class="quiet" disabled>Save project</button><button id="exportStl" class="primary" disabled>Export STL <span aria-hidden="true">↗</span></button></div>
+    </header>
+    <main class="studio-layout">
+      <aside class="design-panel" aria-label="Lattice design controls">
+        <form id="designForm">
+          <fieldset id="designControls">
+            <section class="panel-section">
+              <div class="section-label"><span>01</span><h2>Source model</h2></div>
+              <label id="dropZone" class="drop-zone" for="stlFile"><span class="upload-symbol" aria-hidden="true">↥</span><strong>Drop an STL here</strong><span>or choose a file · up to 30 MB</span></label>
+              <input id="stlFile" class="visually-hidden" type="file" accept=".stl,model/stl,application/sla" />
+              <div class="source-meta"><strong id="sourceName">Preparing example…</strong><span id="sourceDimensions">All dimensions in millimeters</span><span id="sourceTriangles"></span></div>
+              <div id="scaleNotice" class="scale-notice" role="status" hidden></div>
+              <div class="two-column"><label>STL units<select id="sourceUnits"><option value="1">Millimeters</option><option value="25.4">Inches</option><option value="10">Centimeters</option><option value="1000">Meters</option></select></label><label>Try an example<select id="demoShape"><option value="sphere">Sphere</option><option value="cube">Cube</option><option value="torus">Torus</option></select></label></div>
+              <div class="resize-row"><label>Longest dimension <span class="unit">mm</span><input id="modelSize" type="number" min="0.000001" max="100000" step="any" value="40" /></label><button id="resizeSource" type="button" class="small-button">Resize</button></div>
+              <label class="checkbox-label spaced"><input id="scaleLatticeSettings" type="checkbox" checked /> Scale lattice settings with the model</label>
+              <details id="measurementPanel" class="measurement-panel">
+                <summary>Measure & set scale</summary>
+                <p class="help">Pick two points on the original mesh, then enter their desired straight-line distance. Drag to orbit between picks.</p>
+                <div class="measurement-actions"><button id="measurementStart" type="button" class="small-button" aria-pressed="false">Pick two points</button><button id="measurementClear" type="button" class="small-button" disabled>Clear</button></div>
+                <div id="measurementHint" class="help" aria-live="polite">No points selected.</div>
+                <div class="measurement-reading"><span>Measured distance</span><output id="measurementDistance">—</output></div>
+                <label class="spaced">Desired distance <span class="unit">mm</span><input id="measurementTarget" type="number" min="0.000001" step="any" placeholder="Enter real distance" form="measurementForm" /></label>
+                <button id="measurementApply" type="button" class="small-button measurement-apply" disabled>Scale whole model</button>
+              </details>
+            </section>
+            <section class="panel-section">
+              <div class="section-label"><span>02</span><h2>Lattice structure</h2></div>
+              <div class="mode-grid" role="group" aria-label="Lattice mode">
+                <label class="mode-option"><input type="radio" name="mode" value="struts" checked /><span><b aria-hidden="true">⌘</b><strong>3D struts</strong><small>Open volume</small></span></label>
+                <label class="mode-option"><input type="radio" name="mode" value="walls" /><span><b aria-hidden="true">⬡</b><strong>Cellular walls</strong><small>Closed cells</small></span></label>
+                <label class="mode-option"><input type="radio" name="mode" value="surface" /><span><b aria-hidden="true">◉</b><strong>Surface rods</strong><small>Connected network</small></span></label>
+                <label class="mode-option"><input type="radio" name="mode" value="2d" /><span><b aria-hidden="true">▥</b><strong>2D extrusion</strong><small>Through Z</small></span></label>
+              </div>
+              <p id="modeDescription" class="help">Interconnected struts follow Voronoi cell edges throughout the full 3D volume.</p>
+              <label class="control-label" for="preset">Starting point</label><select id="preset"><option value="custom">Custom settings</option><option value="open" selected>Open & organic</option><option value="dense">Dense structure</option><option value="shelled">Internal lattice + shell</option><option value="skin">Surface rod network</option><option value="cellular">Cellular foam</option><option value="planar">Extruded pattern</option></select>
+              <div id="rodProfileControls" class="rod-profile-controls">
+                <div class="rod-profile-heading"><label>Rod cross-section<select id="rodProfile"><option value="circle">Circle</option><option value="rectangle">Rectangle</option><option value="polygon">Regular polygon</option></select></label><svg class="rod-profile-preview" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path d="M50 8V92M8 50H92" /><polygon id="rodProfileOutline" points="81,50 65.5,76.85 34.5,76.85 19,50 34.5,23.15 65.5,23.15" /></svg></div>
+                <div class="two-column"><label id="rodAspectRow" hidden>Height / width<input id="rodAspect" type="number" min="0.25" max="4" step="any" value="1" /></label><label id="rodSidesRow" hidden>Polygon sides<input id="rodSides" type="number" min="3" max="12" step="1" value="6" /></label><label id="rodRotationRow" hidden>Rod rotation <span class="unit">°</span><input id="rodRotation" type="number" min="0" max="360" step="any" value="0" /></label></div>
+                <p id="rodProfileHint" class="help">Diameter controls the round cross-section.</p><p class="profile-node-note">Rods share fused junctions in both surface and 3D networks.</p>
+              </div>
+              <div class="two-column spaced"><label>Cell size <span class="unit">mm</span><input id="cellSize" type="number" min="0.2" max="500" step="any" value="8" required /><input id="cellSizeSlider" aria-label="Cell size in millimeters" type="range" min="0.5" max="24" step="0.1" value="8" /></label><label id="thicknessLabel">Strut diameter <span class="unit">mm</span><input id="thickness" type="number" min="0.05" max="100" step="any" value="1.6" required /><input id="thicknessSlider" aria-label="Strut or wall thickness in millimeters" type="range" min="0.2" max="6" step="0.05" value="1.6" /></label></div>
+              <p class="help">Smaller cells make a denser network. Thicker connections add material and reduce openings.</p>
+              <label class="range-label" for="randomness">Cell irregularity <output id="randomnessValue">85%</output></label><input id="randomness" type="range" min="0" max="1" step="0.05" value="0.85" />
+              <div class="seed-row"><label>Pattern seed<input id="seed" type="number" min="0" max="2147483647" step="1" value="42" required /></label><button type="button" id="shuffleSeed" class="small-button" aria-label="Choose another random pattern seed">Shuffle ↻</button></div>
+            </section>
+            <section class="panel-section">
+              <div class="section-label"><span>03</span><h2>Shell & solid regions</h2></div>
+              <label>Outer solid shell <span class="unit">mm</span><input id="shellThickness" type="number" min="0" max="100" step="any" value="0" required /></label>
+              <p class="help">Set to 0 for an open lattice. Add a shell to enclose internal struts.</p>
+              <div id="surfaceInsetControls" hidden><label>Surface inset <span class="unit">mm</span><input id="surfaceInset" type="number" min="0" max="100" step="any" value="0" /></label><p class="help">0 centers rods on the source surface; rods extend by half their profile. Positive values move the network inward.</p></div>
+              <div class="two-column"><label>Solid bottom <span class="unit">mm</span><input id="bottomThickness" type="number" min="0" max="100" step="any" value="0" required /></label><label>Solid top <span class="unit">mm</span><input id="topThickness" type="number" min="0" max="100" step="any" value="0" required /></label></div>
+            </section>
+            <details class="panel-section advanced-section"><summary>Shape & density grading</summary>
+              <p class="help">Stretch cells along an axis. Grade thickness from one end of the model to the other.</p>
+              <div class="three-column"><label>Cell X<input id="stretchX" type="number" min="0.25" max="4" step="any" value="1" /></label><label>Cell Y<input id="stretchY" type="number" min="0.25" max="4" step="any" value="1" /></label><label>Cell Z<input id="stretchZ" type="number" min="0.25" max="4" step="any" value="1" /></label></div>
+              <label class="spaced">Thickness gradient<select id="gradientAxis"><option value="none">Uniform</option><option value="x">Along X</option><option value="y">Along Y</option><option value="z">Along Z</option></select></label>
+              <label class="range-label" for="gradientStrength">Gradient strength <output id="gradientValue">0%</output></label><input id="gradientStrength" type="range" min="-0.8" max="0.8" step="0.05" value="0" />
+              <p class="help">Positive values thicken the high end of the selected axis; negative values reverse it.</p>
+            </details>
+            <details class="panel-section advanced-section"><summary>Quality & print checks</summary>
+              <label class="spaced">Surface quality<select id="quality"><option value="draft">Draft · fast exploration</option><option value="balanced" selected>Balanced</option><option value="fine">Fine · more detail</option></select></label>
+              <p id="qualityHelp" class="help">Quality controls round-profile smoothness and how closely surface rods follow curved geometry.</p>
+              <div id="samplingControls"><label class="spaced">Custom sampling size <span class="unit">mm</span><input id="resolution" type="number" min="0" max="10" step="any" value="0" /></label><p class="help">0 = automatic. Smaller values capture finer features and take longer. The result shows the actual sampling size after resource limits.</p></div>
+              <label>Nozzle diameter <span class="unit">mm</span><select id="nozzle"><option value="0.2">0.2</option><option value="0.4" selected>0.4</option><option value="0.6">0.6</option><option value="0.8">0.8</option><option value="1">1.0</option></select></label>
+              <label class="checkbox-label spaced"><input id="keepLargest" type="checkbox" /> Keep only the largest connected piece</label><p class="help">This removes disconnected pieces, including separate bodies in your source.</p>
+            </details>
+          </fieldset>
+          <div class="generate-area"><button id="generate" class="primary generate-button" type="submit" disabled><span aria-hidden="true">✳</span> Generate lattice</button><button id="cancel" class="cancel-button" type="button" hidden>Cancel generation</button><span id="generationHint">STL files stay on this device.</span></div>
+        </form>
+        <form id="measurementForm"></form>
+      </aside>
+      <section class="model-panel" aria-label="3D model preview">
+        <div class="viewport-top"><div><span class="eyebrow">LATTICE WORKSPACE</span><h2 id="previewTitle">Open & organic</h2></div><span id="previewBadge" class="preview-badge">Preparing model</span></div>
+        <canvas id="latticeCanvas" aria-label="Interactive 3D lattice. Drag to orbit, shift-drag to pan, scroll to zoom." tabindex="0"></canvas>
+        <div id="viewerError" class="viewer-error" role="alert" hidden></div>
+        <div class="view-tools" role="group" aria-label="Camera views"><button id="fitView" title="Fit model (F)">Fit</button><button data-view="iso" title="Isometric view">3D</button><button data-view="top">Top</button><button data-view="front">Front</button><button data-view="right">Right</button></div>
+        <div class="viewport-bottom">
+          <div class="view-options"><label><input id="showSource" type="checkbox" /> Source</label><label><input id="showResult" type="checkbox" checked /> Lattice</label><label><input id="wireframe" type="checkbox" /> Wireframe</label><label class="color-control">Color <input id="modelColor" type="color" value="#367a83" aria-label="Preview color" /></label></div>
+          <div class="cutaway-control"><label for="cutAxis">Cutaway</label><select id="cutAxis"><option value="none">Off</option><option value="x">X axis</option><option value="y">Y axis</option><option value="z">Z axis</option></select><input id="cut" aria-label="Cutaway position" type="range" min="0.02" max="0.98" step="0.01" value="0.5" disabled /><output id="cutValue">50%</output></div>
+          <span class="orbit-help">Drag to orbit · Shift-drag to pan · Scroll to zoom · Cutaway affects preview only</span>
+        </div>
+        <div id="progressPanel" class="progress-panel" hidden><div><span id="progressMessage">Generating lattice…</span><strong id="progressValue">0%</strong></div><progress id="jobProgress" max="1" value="0"></progress></div>
+      </section>
+      <aside class="result-panel" aria-label="Result details">
+        <div class="result-heading"><span class="eyebrow">OUTPUT</span><h2>Model insights</h2><p id="resultSummary">Generate a lattice to inspect its geometry.</p></div>
+        <div class="density-visual"><span id="densityNumber">—</span><strong>relative density</strong><div class="density-track"><i id="densityBar"></i></div><small>Material volume vs. source</small></div>
+        <dl class="metric-list"><div><dt>Material saved</dt><dd id="materialSaved">—</dd></div><div><dt>Lattice volume</dt><dd id="resultVolume">—</dd></div><div><dt>Triangles</dt><dd id="resultTriangles">—</dd></div><div><dt>Connected pieces</dt><dd id="resultComponents">—</dd></div><div><dt>Voronoi sites</dt><dd id="resultSites">—</dd></div><div><dt>Sampling size</dt><dd id="resultResolution">—</dd></div><div><dt>Generation time</dt><dd id="resultTime">—</dd></div></dl>
+        <div class="checks-section"><h3>Geometry checks</h3><div id="meshCheck" class="check-state">Waiting for a result</div><ul id="warnings" class="warnings"></ul></div>
+        <details class="print-note"><summary>Before printing</summary><p>Open rods can need supports. Cellular walls and solid shells can trap resin or powder. Inspect the exported file in your slicer and add drainage where needed.</p><p>Quality controls rod smoothness and curved-surface accuracy; sampled solids also depend on the sampling size. Geometry checks do not certify strength or detect every self-intersection.</p></details>
+        <button id="exportReport" class="report-button" disabled>Download geometry report</button>
+      </aside>
+    </main>
+    <div id="status" class="status-bar" role="status" aria-live="polite">Loading the local geometry workspace…</div>
+    <input id="projectFile" type="file" accept=".json,application/json" hidden />
+    <noscript>This studio needs JavaScript to generate and display local 3D geometry.</noscript>
+    <script type="module" src="../../assets/voronoi/lattice-app.js?v=20260905-release45"></script>
+  </body>
+</html>

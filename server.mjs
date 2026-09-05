@@ -83,8 +83,8 @@ const contentSecurityPolicy = [
   "frame-ancestors 'self'",
 ].join('; ');
 
-// OpenCascade's generated Embind layer compiles tiny argument marshalling
-// functions at runtime. Grant that capability only to the isolated STEP
+// The CAD kernels' generated Embind layers compile argument marshalling
+// functions at runtime. Grant that capability only to the isolated geometry
 // worker; the editor document itself keeps the stricter policy above.
 const stepWorkerContentSecurityPolicy = contentSecurityPolicy.replace(
   "script-src 'self' 'wasm-unsafe-eval'",
@@ -917,7 +917,7 @@ async function serveStatic(req, res, root) {
       ...commonHeaders,
       'Cache-Control': staticCacheControl(file),
       'Content-Type': types[extname(file).toLocaleLowerCase('en-US')] || 'application/octet-stream',
-      'Content-Security-Policy': requestedFile === 'assets/medals/cad-step-worker.js'
+      'Content-Security-Policy': ['assets/medals/cad-step-worker.js','assets/voronoi/lattice-worker.js'].includes(requestedFile)
         ? stepWorkerContentSecurityPolicy
         : contentSecurityPolicy,
     });

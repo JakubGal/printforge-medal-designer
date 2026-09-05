@@ -11,6 +11,17 @@ export const WORKSPACES = Object.freeze([
     capabilities: ['3D direct editing', 'Image to objects', '3MF · STL · STEP · PDF'],
   }),
   Object.freeze({
+    id: 'voronoi',
+    name: 'Voronoi lattice',
+    category: 'Generative structures',
+    description: 'Turn an STL into an organic cellular structure. Explore true internal 3D lattices, surface networks, and extruded patterns with a live cutaway view.',
+    href: './workspaces/voronoi/',
+    status: 'ready',
+    action: 'Open studio',
+    visual: 'voronoi',
+    capabilities: ['STL import', '3D volume & surface lattices', 'Binary STL'],
+  }),
+  Object.freeze({
     id: 'skadis',
     name: 'Skådis Organizer Studio',
     category: 'Home & workshop',

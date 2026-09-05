@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 
 const root = process.cwd();
 const destination = join(root, 'public');
-const releaseTag = '20260901-release37';
+const releaseTag = '20260905-release45';
 const rootFiles = [
   'index.html',
   '404.html',
@@ -19,6 +19,20 @@ const rootFiles = [
 ];
 const workspaceFiles = [
   'workspaces/medals/index.html',
+  'workspaces/voronoi/index.html',
+];
+const voronoiFiles = [
+  'lattice-app.js',
+  'lattice.css',
+  'lattice-engine.js',
+  'lattice-worker.js',
+  'lattice-viewer.js',
+  'lattice-settings.js',
+  'lattice-solid.js',
+  'lattice-rods.js',
+  'lattice-surface.js',
+  'lattice-manifold.js',
+  'lattice-validate.js',
 ];
 const medalFiles = [
   'styles.css',
@@ -69,10 +83,15 @@ await mkdir(destination, { recursive: true });
 await Promise.all(rootFiles.map(file => copyProjectFile(file)));
 await Promise.all(workspaceFiles.map(file => copyProjectFile(file)));
 await Promise.all(medalFiles.map(file => copyProjectFile(file, join('assets', 'medals', file))));
+await Promise.all(voronoiFiles.map(file => copyProjectFile(file, join('assets', 'voronoi', file))));
+const rodKernelDestination = join(destination, 'assets', 'voronoi', 'manifold');
+await mkdir(rodKernelDestination, { recursive: true });
+await Promise.all(['manifold.js','manifold.wasm','LICENSE'].map(file => copyFile(join(root,'node_modules','manifold-3d',file),join(rodKernelDestination,file))));
 await cp(guideAssetSource, guideAssetDestination, { recursive: true, force: true });
 const browserModules = [
   ...rootFiles.filter(file => file.endsWith('.js')).map(file => join(destination, file)),
   ...medalFiles.filter(file => file.endsWith('.js')).map(file => join(medalAssetDestination, file)),
+  ...voronoiFiles.filter(file => file.endsWith('.js')).map(file => join(destination, 'assets', 'voronoi', file)),
 ];
 await Promise.all(browserModules.map(async file => {
   const source = await readFile(file, 'utf8');
@@ -88,4 +107,4 @@ await Promise.all([
   copyFile(join(cadKernelSource, 'dist', 'replicad_single.wasm'), join(cadKernelDestination, 'replicad_single.wasm')),
   copyFile(join(cadKernelSource, 'LICENSE'), join(cadKernelDestination, 'LICENSE.txt')),
 ]);
-console.log(`Synced the workspace hub, ${workspaceFiles.length} studio, ${medalFiles.length} medal assets, eight quick guides, and the lazy OpenCascade kernel to public/.`);
+console.log(`Synced the workspace hub, ${workspaceFiles.length} studios, ${medalFiles.length} medal assets, ${voronoiFiles.length} Voronoi assets, eight quick guides, and the lazy OpenCascade kernel to public/.`);

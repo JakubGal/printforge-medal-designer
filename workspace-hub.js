@@ -14,6 +14,11 @@ const grid = document.querySelector('#workspaceGrid');
 
 const WORKSPACE_COPY = Object.freeze({
   en: Object.freeze({
+    voronoi: Object.freeze({
+      name: 'Voronoi lattice', category: 'Generative structures',
+      description: 'Turn an STL into an organic cellular structure. Explore true internal 3D lattices, surface networks, and extruded patterns with a live cutaway view.',
+      action: 'Open studio', capabilities: Object.freeze(['STL import', '3D volume & surface lattices', 'Binary STL']),
+    }),
     medals: Object.freeze({
       name: 'Medal Studio', category: 'Events & awards',
       description: 'Design detailed, multicolor, single- or double-sided medals with ribbon attachments, live pricing, print checks, and production exports.',
@@ -32,6 +37,11 @@ const WORKSPACE_COPY = Object.freeze({
     ready: 'Ready now', planned: 'Planned',
   }),
   sk: Object.freeze({
+    voronoi: Object.freeze({
+      name: 'Voronoi mriežka', category: 'Generatívne štruktúry',
+      description: 'Premeňte STL na organickú bunkovú štruktúru. Preskúmajte vnútorné 3D mriežky, povrchové siete a extrudované vzory s interaktívnym rezom.',
+      action: 'Otvoriť štúdio', capabilities: Object.freeze(['Import STL', 'Objemové a povrchové 3D mriežky', 'Binárne STL']),
+    }),
     medals: Object.freeze({
       name: 'Štúdio medailí', category: 'Podujatia a ocenenia',
       description: 'Navrhujte detailné viacfarebné jednostranné aj obojstranné medaily s uchytením stuhy, okamžitým odhadom ceny, kontrolou tlače a výrobnými exportmi.',
@@ -50,6 +60,11 @@ const WORKSPACE_COPY = Object.freeze({
     ready: 'Pripravené', planned: 'Plánované',
   }),
   cs: Object.freeze({
+    voronoi: Object.freeze({
+      name: 'Voronoi mřížka', category: 'Generativní struktury',
+      description: 'Proměňte STL v organickou buněčnou strukturu. Prozkoumejte vnitřní 3D mřížky, povrchové sítě a extrudované vzory s interaktivním řezem.',
+      action: 'Otevřít studio', capabilities: Object.freeze(['Import STL', 'Objemové a povrchové 3D mřížky', 'Binární STL']),
+    }),
     medals: Object.freeze({
       name: 'Studio medailí', category: 'Události a ocenění',
       description: 'Navrhujte detailní vícebarevné jednostranné i oboustranné medaile s uchycením stuhy, okamžitým odhadem ceny, kontrolou tisku a výrobními exporty.',
@@ -68,6 +83,11 @@ const WORKSPACE_COPY = Object.freeze({
     ready: 'Připraveno', planned: 'Plánováno',
   }),
   de: Object.freeze({
+    voronoi: Object.freeze({
+      name: 'Voronoi-Gitter', category: 'Generative Strukturen',
+      description: 'Verwandeln Sie eine STL-Datei in eine organische Zellstruktur. Erkunden Sie innere 3D-Gitter, Oberflächennetze und extrudierte Muster mit interaktiver Schnittansicht.',
+      action: 'Studio öffnen', capabilities: Object.freeze(['STL-Import', '3D-Volumen- und Oberflächengitter', 'Binäres STL']),
+    }),
     medals: Object.freeze({
       name: 'Medaillen-Studio', category: 'Veranstaltungen und Auszeichnungen',
       description: 'Gestalten Sie detailreiche, mehrfarbige, ein- oder beidseitige Medaillen mit Bandbefestigung, sofortiger Preisschätzung, Druckprüfung und Produktionsdateien.',
@@ -86,6 +106,11 @@ const WORKSPACE_COPY = Object.freeze({
     ready: 'Jetzt verfügbar', planned: 'Geplant',
   }),
   pl: Object.freeze({
+    voronoi: Object.freeze({
+      name: 'Siatka Voronoi', category: 'Struktury generatywne',
+      description: 'Zamień plik STL w organiczną strukturę komórkową. Odkrywaj wewnętrzne siatki 3D, sieci powierzchniowe i wytłaczane wzory z interaktywnym przekrojem.',
+      action: 'Otwórz studio', capabilities: Object.freeze(['Import STL', 'Siatki objętościowe i powierzchniowe 3D', 'Binarny STL']),
+    }),
     medals: Object.freeze({
       name: 'Studio medali', category: 'Wydarzenia i nagrody',
       description: 'Projektuj szczegółowe, wielokolorowe, jedno- lub dwustronne medale z mocowaniem wstążki, natychmiastową wyceną, kontrolą druku i eksportem produkcyjnym.',
@@ -109,6 +134,27 @@ function localizedWorkspace(workspace, locale) {
   return WORKSPACE_COPY[locale]?.[workspace.id] || WORKSPACE_COPY.en[workspace.id] || workspace;
 }
 
+function voronoiVisual() {
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('viewBox', '0 0 400 174');
+  svg.setAttribute('focusable', 'false');
+  const network = 'M116 47 L155 39 L177 55 L171 83 L136 91 L112 72 Z M155 39 L188 26 L217 44 L214 71 L177 55 M217 44 L250 34 L275 53 L263 79 L234 89 L214 71 M275 53 L296 78 L286 111 L257 113 L234 89 M257 113 L249 140 L214 148 L195 123 L207 100 L234 89 M214 148 L177 145 L160 125 L173 104 L195 123 M177 145 L143 137 L129 116 L136 91 M160 125 L129 116 M173 104 L171 83 M207 100 L214 71 M112 72 L105 101 L129 116 M188 26 L222 21 L250 34';
+  const connectors = 'M116 47 L95 35 M155 39 L134 27 M177 55 L156 43 M171 83 L150 71 M136 91 L115 79 M112 72 L91 60 M188 26 L167 14 M217 44 L196 32 M214 71 L193 59 M250 34 L229 22 M275 53 L254 41 M263 79 L242 67 M234 89 L213 77 M296 78 L275 66 M286 111 L265 99 M257 113 L236 101 M249 140 L228 128 M214 148 L193 136 M195 123 L174 111 M207 100 L186 88 M177 145 L156 133 M160 125 L139 113 M173 104 L152 92 M143 137 L122 125 M129 116 L108 104 M105 101 L84 89';
+  for (const [className, d, transform] of [
+    ['lattice-depth', network, 'translate(-21 -12)'],
+    ['lattice-connectors', connectors, ''],
+    ['lattice-front', network, ''],
+  ]) {
+    const path = document.createElementNS(svgNS, 'path');
+    path.setAttribute('class', className);
+    path.setAttribute('d', d);
+    if (transform) path.setAttribute('transform', transform);
+    svg.append(path);
+  }
+  return svg;
+}
+
 function workspaceCard(workspace, locale) {
   const copy = localizedWorkspace(workspace, locale);
   const localeCopy = WORKSPACE_COPY[locale] || WORKSPACE_COPY.en;
@@ -119,7 +165,8 @@ function workspaceCard(workspace, locale) {
   const visual = document.createElement('div');
   visual.className = `workspace-visual ${workspace.visual}`;
   visual.setAttribute('aria-hidden', 'true');
-  visual.replaceChildren(document.createElement('span'), document.createElement('i'), document.createElement('b'));
+  if (workspace.visual === 'voronoi') visual.append(voronoiVisual());
+  else visual.replaceChildren(document.createElement('span'), document.createElement('i'), document.createElement('b'));
 
   const body = document.createElement('div');
   body.className = 'workspace-card-body';

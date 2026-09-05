@@ -43,7 +43,7 @@ async function assertModuleGraph(moduleFile) {
     assertInsideOutput(target, `${reference} from ${normalized} must not escape public/`);
     assert.equal(await exists(target), true, `${reference} from ${normalized} must exist`);
     if (target.endsWith('.js')) {
-      assert.match(reference, /\?v=20260901-release37$/u, `${reference} from ${normalized} must carry the current release cache key`);
+      assert.match(reference, /\?v=20260905-release45$/u, `${reference} from ${normalized} must carry the current release cache key`);
       await assertModuleGraph(target);
     }
   }
@@ -51,6 +51,7 @@ async function assertModuleGraph(moduleFile) {
 
 const hub = join(output, 'index.html');
 const medal = join(output, 'workspaces', 'medals', 'index.html');
+const voronoi = join(output, 'workspaces', 'voronoi', 'index.html');
 const notFound = join(output, '404.html');
 const wasm = join(output, 'assets', 'medals', 'cad-kernel', 'replicad_single.wasm');
 const shapeLibrary = join(output, 'assets', 'medals', 'shape-library.js');
@@ -58,16 +59,23 @@ const guideLibrary = join(output, 'assets', 'medals', 'guide-library.js');
 
 assert.equal(await exists(hub), true, 'workspace hub must be emitted');
 assert.equal(await exists(medal), true, 'medal workspace must be emitted');
+assert.equal(await exists(voronoi), true, 'Voronoi workspace must be emitted');
 assert.equal(await exists(notFound), true, 'a physical 404 page must disable Cloudflare SPA fallback');
 assert.equal(await exists(shapeLibrary), true, 'the canonical symbol library must be emitted');
 assert.equal(await exists(guideLibrary), true, 'the quick-guide catalog must be emitted');
 assert.match(await readFile(hub, 'utf8'), /PrintForge/u);
 assert.match(await readFile(medal, 'utf8'), /MedalForge/u);
+assert.match(await readFile(voronoi, 'utf8'), /Voronoi/u);
 assert.match(await readFile(notFound, 'utf8'), /PrintForge · 404/u);
 await assertLocalReferences(hub);
 await assertLocalReferences(medal);
+await assertLocalReferences(voronoi);
 await assertModuleGraph(join(output, 'workspace-hub.js'));
 await assertModuleGraph(join(output, 'assets', 'medals', 'app.js'));
+await assertModuleGraph(join(output, 'assets', 'voronoi', 'lattice-app.js'));
+await assertModuleGraph(join(output, 'assets', 'voronoi', 'lattice-worker.js'));
+assert.ok((await stat(join(output,'assets','voronoi','manifold','manifold.wasm'))).size > 100000, 'local rod Boolean kernel must be emitted');
+assert.equal(await exists(join(output,'assets','voronoi','manifold','LICENSE')), true, 'rod kernel license must be included');
 const guideLibraryUrl = `${pathToFileURL(guideLibrary).href}?release=${Date.now()}`;
 const { GUIDE_LIBRARY } = await import(guideLibraryUrl);
 assert.equal(GUIDE_LIBRARY.length, 8, 'all eight quick guides must be present in the static release');
@@ -101,8 +109,9 @@ assert.match(headers, /X-Content-Type-Options:\s*nosniff/u);
 assert.match(headers, /X-Frame-Options:\s*SAMEORIGIN/u);
 assert.match(headers, /^\/\s*[\s\S]*?Content-Security-Policy:/mu);
 assert.match(headers, /^\/workspaces\/medals\/\*\s*[\s\S]*?Content-Security-Policy:/mu);
+assert.match(headers, /^\/workspaces\/voronoi\/\*\s*[\s\S]*?Content-Security-Policy:/mu);
 assert.match(headers, /media-src\s+'self'/u);
 assert.match(headers, /cad-step-worker\.js[\s\S]*unsafe-eval/u);
 assert.doesNotMatch(headers.split(/\r?\n\r?\n/u)[0], /Content-Security-Policy/u, 'the broad Cloudflare rule must not add a second CSP to the STEP worker');
 
-console.log('Static release verified: hub, medal workspace, assets, worker policy, and repository boundary are intact.');
+console.log('Static release verified: hub, medal and Voronoi workspaces, assets, worker policy, and repository boundary are intact.');
