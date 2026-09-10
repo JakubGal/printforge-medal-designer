@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#eef2f4" />
     <meta name="description" content="Turn an STL into a Voronoi lattice. Create connected surface and 3D rods with round, rectangular, or polygon cross-sections, plus cellular walls and extruded patterns locally in your browser." />
     <title>Voronoi lattice · PrintForge</title>
-    <link rel="stylesheet" href="../../assets/voronoi/lattice.css?v=20260905-release45" />
+    <link rel="stylesheet" href="../../assets/voronoi/lattice.css?v=20260910-release47" />
   </head>
   <body>
     <header class="studio-header">
@@ -54,9 +54,9 @@
                 <div class="two-column"><label id="rodAspectRow" hidden>Height / width<input id="rodAspect" type="number" min="0.25" max="4" step="any" value="1" /></label><label id="rodSidesRow" hidden>Polygon sides<input id="rodSides" type="number" min="3" max="12" step="1" value="6" /></label><label id="rodRotationRow" hidden>Rod rotation <span class="unit">°</span><input id="rodRotation" type="number" min="0" max="360" step="any" value="0" /></label></div>
                 <p id="rodProfileHint" class="help">Diameter controls the round cross-section.</p><p class="profile-node-note">Rods share fused junctions in both surface and 3D networks.</p>
               </div>
-              <div class="two-column spaced"><label>Cell size <span class="unit">mm</span><input id="cellSize" type="number" min="0.2" max="500" step="any" value="8" required /><input id="cellSizeSlider" aria-label="Cell size in millimeters" type="range" min="0.5" max="24" step="0.1" value="8" /></label><label id="thicknessLabel">Strut diameter <span class="unit">mm</span><input id="thickness" type="number" min="0.05" max="100" step="any" value="1.6" required /><input id="thicknessSlider" aria-label="Strut or wall thickness in millimeters" type="range" min="0.2" max="6" step="0.05" value="1.6" /></label></div>
+              <div class="two-column spaced"><label>Cell size <span class="unit">mm</span><input id="cellSize" type="number" min="0.2" max="500" step="any" value="8" required /><input id="cellSizeSlider" aria-label="Cell size in millimeters" type="range" min="0" max="1000" step="1" value="328" /></label><label id="thicknessLabel">Strut diameter <span class="unit">mm</span><input id="thickness" type="number" min="0.05" max="100" step="any" value="1.6" required /><input id="thicknessSlider" aria-label="Strut or wall thickness in millimeters" type="range" min="0" max="1000" step="1" value="262" /></label></div>
               <p class="help">Smaller cells make a denser network. Thicker connections add material and reduce openings.</p>
-              <label class="range-label" for="randomness">Cell irregularity <output id="randomnessValue">85%</output></label><input id="randomness" type="range" min="0" max="1" step="0.05" value="0.85" />
+              <label class="range-label" for="randomness">Cell irregularity <output id="randomnessValue">85%</output></label><input id="randomness" type="range" min="0" max="1" step="any" value="0.85" />
               <div class="seed-row"><label>Pattern seed<input id="seed" type="number" min="0" max="2147483647" step="1" value="42" required /></label><button type="button" id="shuffleSeed" class="small-button" aria-label="Choose another random pattern seed">Shuffle ↻</button></div>
             </section>
             <section class="panel-section">
@@ -70,7 +70,7 @@
               <p class="help">Stretch cells along an axis. Grade thickness from one end of the model to the other.</p>
               <div class="three-column"><label>Cell X<input id="stretchX" type="number" min="0.25" max="4" step="any" value="1" /></label><label>Cell Y<input id="stretchY" type="number" min="0.25" max="4" step="any" value="1" /></label><label>Cell Z<input id="stretchZ" type="number" min="0.25" max="4" step="any" value="1" /></label></div>
               <label class="spaced">Thickness gradient<select id="gradientAxis"><option value="none">Uniform</option><option value="x">Along X</option><option value="y">Along Y</option><option value="z">Along Z</option></select></label>
-              <label class="range-label" for="gradientStrength">Gradient strength <output id="gradientValue">0%</output></label><input id="gradientStrength" type="range" min="-0.8" max="0.8" step="0.05" value="0" />
+              <label class="range-label" for="gradientStrength">Gradient strength <output id="gradientValue">0%</output></label><input id="gradientStrength" type="range" min="-0.8" max="0.8" step="any" value="0" />
               <p class="help">Positive values thicken the high end of the selected axis; negative values reverse it.</p>
             </details>
             <details class="panel-section advanced-section"><summary>Quality & print checks</summary>
@@ -109,6 +109,6 @@
     <div id="status" class="status-bar" role="status" aria-live="polite">Loading the local geometry workspace…</div>
     <input id="projectFile" type="file" accept=".json,application/json" hidden />
     <noscript>This studio needs JavaScript to generate and display local 3D geometry.</noscript>
-    <script type="module" src="../../assets/voronoi/lattice-app.js?v=20260905-release45"></script>
+    <script type="module" src="../../assets/voronoi/lattice-app.js?v=20260910-release47"></script>
   </body>
 </html>

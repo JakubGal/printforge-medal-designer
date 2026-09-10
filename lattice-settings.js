@@ -11,6 +11,30 @@ const PRESETS = Object.freeze({
 const DIMENSIONAL_OPTIONS = ['cellSize', 'thickness', 'shellThickness', 'surfaceInset', 'surfaceDepth', 'bottomThickness', 'topThickness', 'resolution'];
 const POSITIVE_OPTIONS = new Set(['cellSize', 'thickness', 'surfaceDepth']);
 
+// Sliders use an integer position, independent of STL units and floating-point
+// bounds. The number fields remain authoritative and accept arbitrary decimals.
+const SLIDER_RANGES = { cellSize: [.005, .6], thickness: [.001, .15] };
+export function formatLatticeInput(value) {
+  return Number.isFinite(value) ? String(Number(value.toPrecision(6))) : '';
+}
+
+function sliderBounds(kind, span) {
+  if (!SLIDER_RANGES[kind] || !Number.isFinite(span) || span <= 0) throw new Error('A dimension slider needs a valid model size.');
+  return SLIDER_RANGES[kind].map(fraction => fraction * span);
+}
+
+export function latticeSliderPosition(kind, value, span) {
+  const [min, max] = sliderBounds(kind, span);
+  if (!Number.isFinite(value)) return 0;
+  return Math.round(Math.max(0, Math.min(1, (value - min) / (max - min))) * 1000);
+}
+
+export function latticeSliderValue(kind, position, span) {
+  const [min, max] = sliderBounds(kind, span);
+  const fraction = Math.max(0, Math.min(1000, Number(position) || 0)) / 1000;
+  return formatLatticeInput(min + fraction * (max - min));
+}
+
 function positiveFactor(factor) {
   if (!Number.isFinite(factor) || factor <= 0) throw new Error('Choose a positive, finite model scale.');
   return factor;

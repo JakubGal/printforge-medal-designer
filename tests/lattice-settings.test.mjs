@@ -1,6 +1,47 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { presetLatticeOptions, scaleLatticeOptions, resizeSourceMesh } from '../lattice-settings.js';
+import { readFile } from 'node:fs/promises';
+import { presetLatticeOptions, scaleLatticeOptions, resizeSourceMesh, formatLatticeInput, latticeSliderPosition, latticeSliderValue } from '../lattice-settings.js';
+
+test('dimension sliders have valid integer positions for arbitrary typed values and imported model sizes', async () => {
+  const html = await readFile(new URL('../workspaces/voronoi/index.html', import.meta.url), 'utf8');
+  for (const [kind, value] of [['cellSize', 11.4], ['thickness', 2.4]]) {
+    const tag = html.match(new RegExp(`<input id="${kind}Slider"[^>]+>`))[0];
+    const min = Number(tag.match(/ min="([^"]+)"/)[1]);
+    const max = Number(tag.match(/ max="([^"]+)"/)[1]);
+    const step = Number(tag.match(/ step="([^"]+)"/)[1]);
+    assert.deepEqual([min, max, step], [0, 1000, 1]);
+    assert.match(html.match(new RegExp(`<input id="${kind}"[^>]+>`))[0], /step="any"/);
+    for (const span of [172.12286376953125, 1.5869860649108887, 200, .000001, 100000]) {
+      for (const typed of [value, span * .00001, span * .007123456789, span, span * 2]) {
+        const position = latticeSliderPosition(kind, typed, span);
+        assert.ok(position >= min && position <= max);
+        assert.equal((position - min) % step, 0, `${kind}: slider must not block Generate or Save for ${typed} on a ${span} mm source`);
+      }
+      for (let position = 0; position <= 1000; position++) {
+        const dimension = Number(latticeSliderValue(kind, position, span));
+        assert.ok(Number.isFinite(dimension) && dimension > 0);
+        assert.equal(latticeSliderPosition(kind, dimension, span), position, 'moving and resynchronizing a slider must not move its thumb');
+      }
+    }
+  }
+});
+
+test('automatic dimension formatting removes float tails without erasing tiny geometry', () => {
+  assert.equal(formatLatticeInput(11.4461704406738), '11.4462');
+  assert.equal(formatLatticeInput(2.40972009277), '2.40972');
+  assert.equal(formatLatticeInput(.1 + .2), '0.3');
+  assert.equal(formatLatticeInput(200), '200');
+  for (const value of [1.5869860649108887, .039674651622772217, 1.5869860649e-12, 0]) {
+    const formatted = Number(formatLatticeInput(value));
+    assert.ok(value === 0 ? formatted === 0 : Math.abs(formatted / value - 1) < 5e-6);
+  }
+});
+
+test('saved fractional irregularity and grading are not restricted to slider step multiples', async () => {
+  const html = await readFile(new URL('../workspaces/voronoi/index.html', import.meta.url), 'utf8');
+  for (const id of ['randomness', 'gradientStrength']) assert.match(html.match(new RegExp(`<input id="${id}"[^>]+>`))[0], /step="any"/);
+});
 
 const close = (actual, expected, tolerance = 1e-10) => assert.ok(Math.abs(actual - expected) <= Math.max(tolerance, Math.abs(expected) * tolerance), `${actual} should equal ${expected}`);
 const source = () => ({

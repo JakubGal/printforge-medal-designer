@@ -1,6 +1,6 @@
-import { LatticeViewer, measurementScaleFactor } from './lattice-viewer.js?v=20260905-release45';
-import { encodeBinarySTL, normalizeOptions } from './lattice-engine.js?v=20260905-release45';
-import { presetLatticeOptions, scaleLatticeOptions, resizeSourceMesh } from './lattice-settings.js?v=20260905-release45';
+import { LatticeViewer, measurementScaleFactor } from './lattice-viewer.js?v=20260910-release47';
+import { encodeBinarySTL, normalizeOptions } from './lattice-engine.js?v=20260910-release47';
+import { presetLatticeOptions, scaleLatticeOptions, resizeSourceMesh, formatLatticeInput, latticeSliderPosition, latticeSliderValue } from './lattice-settings.js?v=20260910-release47';
 
 const $ = id => document.getElementById(id);
 const MAX_FILE_BYTES = 30 * 1024 * 1024;
@@ -112,7 +112,7 @@ function runJob(payload) {
   return new Promise((resolve, reject) => {
     try {
       if (!worker) {
-        worker = new Worker(new URL('./lattice-worker.js?v=20260905-release45', import.meta.url), { type: 'module' });
+        worker = new Worker(new URL('./lattice-worker.js?v=20260910-release47', import.meta.url), { type: 'module' });
         worker.onmessage = event => {
           const message = event.data;
           if (message.id !== job?.id) return;
@@ -166,10 +166,17 @@ function getOptions() {
     quality: $('quality').value, resolution: number('resolution'), keepLargest: $('keepLargest').checked,
   };
 }
-function applyOptions(options) {
+function applyOptions(options, { preservePrecision = false } = {}) {
   const normalized = normalizeOptions(options, source?.bounds);
   for (const id of ['cellSize','thickness','rodProfile','rodAspect','rodSides','rodRotation','seed','randomness','shellThickness','surfaceInset','bottomThickness','topThickness','gradientAxis','gradientStrength','quality','resolution']) {
-    if (normalized[id] !== undefined) $(id).value = normalized[id];
+    if (normalized[id] !== undefined) {
+      const value = normalized[id];
+      const input = $(id);
+      const dimensional = ['cellSize','thickness','shellThickness','surfaceInset','bottomThickness','topThickness','resolution'].includes(id);
+      const formatted = !preservePrecision && dimensional ? formatLatticeInput(value) : value;
+      // Rounding a value exactly at a physical limit must not invalidate it.
+      input.value = (input.min !== '' && Number(formatted) < Number(input.min)) || (input.max !== '' && Number(formatted) > Number(input.max)) ? value : formatted;
+    }
   }
   ['stretchX','stretchY','stretchZ'].forEach((id, i) => { $(id).value = normalized.stretch?.[i] ?? 1; });
   $('keepLargest').checked = !!normalized.keepLargest;
@@ -213,8 +220,11 @@ function updateMode() {
     : 'Higher quality captures finer cell walls and source detail. Smaller sampling sizes take longer and use more memory.';
   $('randomnessValue').textContent = `${Math.round(number('randomness') * 100)}%`;
   $('gradientValue').textContent = `${Math.round(number('gradientStrength') * 100)}%`;
-  $('cellSizeSlider').value = number('cellSize');
-  $('thicknessSlider').value = number('thickness');
+  const span = source ? Math.max(...source.bounds.size) : 40;
+  for (const id of ['cellSize', 'thickness']) {
+    $(id + 'Slider').value = latticeSliderPosition(id, number(id), span);
+    $(id + 'Slider').setAttribute('aria-valuetext', `${formatMm(number(id))} millimeters`);
+  }
   const preset = $('preset');
   $('previewTitle').textContent = preset.value === 'custom' ? MODE_COPY[mode][0] : preset.options[preset.selectedIndex].text;
 }
@@ -264,13 +274,8 @@ function acceptSource(mesh, name) {
   $('sourceName').textContent = name;
   $('sourceDimensions').textContent = `${mesh.bounds.size.map(formatMm).join(' × ')} mm`;
   $('sourceTriangles').textContent = `${(mesh.positions.length / 9).toLocaleString()} source triangles`;
-  $('modelSize').value = Number(Math.max(...mesh.bounds.size).toPrecision(9));
+  $('modelSize').value = formatLatticeInput(Math.max(...mesh.bounds.size));
   const span = Math.max(...mesh.bounds.size);
-  for (const [id,low,high] of [['cellSizeSlider',.005,.6],['thicknessSlider',.001,.15]]) {
-    $(id).min = span * low;
-    $(id).max = span * high;
-    $(id).step = span / 2000;
-  }
   $('cellSize').max = span * 2;
   for (const id of ['cellSize','thickness']) $(id).min = span * .00001;
   for (const id of ['thickness','shellThickness','surfaceInset','bottomThickness','topThickness','resolution']) $(id).max = span;
@@ -404,7 +409,7 @@ async function rescaleSource(targetSize, calibration = null) {
     sourceOrigin = { type: 'file', buffer, name: sourceName };
     $('sourceUnits').value = '1';
     acceptedUnits = '1';
-    applyOptions(scaledOptions);
+    applyOptions(scaledOptions, { preservePrecision: !$('scaleLatticeSettings').checked });
     $('preset').value = $('scaleLatticeSettings').checked ? selectedPreset : 'custom';
     updateMode();
     if (calibration) {
@@ -459,7 +464,7 @@ async function loadProjectFile(file) {
     sourceOrigin = { type: 'file', buffer: bytes.buffer, name: sourceName };
     $('sourceUnits').value = '1';
     acceptedUnits = '1';
-    applyOptions(options);
+    applyOptions(options, { preservePrecision: true });
     $('preset').value = 'custom';
     if (['0.2','0.4','0.6','0.8','1'].includes(String(project.nozzle))) $('nozzle').value = project.nozzle;
     if (/^#[0-9a-f]{6}$/i.test(project.color)) $('modelColor').value = project.color;
@@ -507,7 +512,7 @@ $('sourceUnits').addEventListener('change', async () => {
     const scaledOptions = $('scaleLatticeSettings').checked ? scaleLatticeOptions(previousOptions, Math.max(...message.mesh.bounds.size) / previousSpan) : previousOptions;
     acceptSource(message.mesh, sourceOrigin.name);
     acceptedUnits = $('sourceUnits').value;
-    applyOptions(scaledOptions);
+    applyOptions(scaledOptions, { preservePrecision: !$('scaleLatticeSettings').checked });
     status('STL units updated. Check dimensions and regenerate.');
   } catch (error) { $('sourceUnits').value = acceptedUnits; status(error.message, error.name !== 'AbortError'); }
 });
@@ -530,7 +535,8 @@ $('shuffleSeed').addEventListener('click', () => {
 const geometryIds = new Set(['cellSize','thickness','rodProfile','rodAspect','rodSides','rodRotation','randomness','seed','shellThickness','surfaceInset','bottomThickness','topThickness','stretchX','stretchY','stretchZ','gradientAxis','gradientStrength','quality','resolution','keepLargest']);
 $('designControls').addEventListener('input', event => {
   if (event.target.id === 'cellSizeSlider' || event.target.id === 'thicknessSlider') {
-    $(event.target.id.replace('Slider', '')).value = event.target.value;
+    const id = event.target.id.replace('Slider', '');
+    $(id).value = latticeSliderValue(id, event.target.value, source ? Math.max(...source.bounds.size) : 40);
     $('preset').value = 'custom';
     updateMode();
     invalidate();
